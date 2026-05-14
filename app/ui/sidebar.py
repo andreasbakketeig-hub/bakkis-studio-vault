@@ -20,6 +20,7 @@ NAV_ITEMS: list[tuple[str, str, str]] = [
     ("plugins",         "◈",  "Plug-in Scanner"),
     ("format_analysis", "⊞",  "Format Analysis"),
     ("plugin_health",   "◎",  "Plugin Health"),
+    ("cleanup",         "⊘",  "Cleanup Recommendations"),
     ("licenses",        "⬡",  "License Vault"),
     ("hardware",        "⬢",  "Hardware Inventory"),
     ("midi",            "♩",  "MIDI Devices"),
