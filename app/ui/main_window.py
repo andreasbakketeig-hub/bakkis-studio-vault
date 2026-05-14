@@ -12,6 +12,7 @@ from app.ui.views.plugin_scanner import PluginScannerView
 from app.ui.views.format_analysis import FormatAnalysisView
 from app.ui.views.plugin_health import PluginHealthView
 from app.ui.views.cleanup_recommendations import CleanupRecommendationsView
+from app.ui.views.music_software_scanner import MusicSoftwareScannerView
 from app.ui.views.coming_soon import ComingSoonView
 
 BG_MAIN = "#0D0F18"
@@ -111,5 +112,7 @@ class MainWindow(ctk.CTk):
                 if self._plugins:
                     view.refresh(self._plugins)
                 return view
+            case "music_software":
+                return MusicSoftwareScannerView(self._content_area)
             case _:
                 return ComingSoonView(self._content_area, module_key=key)
