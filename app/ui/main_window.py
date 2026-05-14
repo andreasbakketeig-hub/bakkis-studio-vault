@@ -13,6 +13,7 @@ from app.ui.views.format_analysis import FormatAnalysisView
 from app.ui.views.plugin_health import PluginHealthView
 from app.ui.views.cleanup_recommendations import CleanupRecommendationsView
 from app.ui.views.music_software_scanner import MusicSoftwareScannerView
+from app.ui.views.migration_assistant import MigrationAssistantView
 from app.ui.views.coming_soon import ComingSoonView
 
 BG_MAIN = "#0D0F18"
@@ -89,6 +90,8 @@ class MainWindow(ctk.CTk):
             self._views["plugin_health"].refresh(plugins)  # type: ignore[union-attr]
         if "cleanup" in self._views:
             self._views["cleanup"].refresh(plugins)  # type: ignore[union-attr]
+        if "migration" in self._views:
+            self._views["migration"].refresh(plugins)  # type: ignore[union-attr]
 
     def _create_view(self, key: str) -> ctk.CTkFrame:
         match key:
@@ -114,5 +117,10 @@ class MainWindow(ctk.CTk):
                 return view
             case "music_software":
                 return MusicSoftwareScannerView(self._content_area)
+            case "migration":
+                view = MigrationAssistantView(self._content_area)
+                if self._plugins:
+                    view.refresh(self._plugins)
+                return view
             case _:
                 return ComingSoonView(self._content_area, module_key=key)

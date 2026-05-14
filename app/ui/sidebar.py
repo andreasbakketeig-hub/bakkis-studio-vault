@@ -17,15 +17,16 @@ TEXT_PRIMARY = "#E8EAF0"
 TEXT_MUTED = "#6B7280"
 
 NAV_ITEMS: list[tuple[str, str, str]] = [
-    ("plugins",         "◈",  "Plug-in Scanner"),
-    ("format_analysis", "⊞",  "Format Analysis"),
-    ("plugin_health",   "◎",  "Plugin Health"),
-    ("cleanup",         "⊘",  "Cleanup Recommendations"),
-    ("music_software",  "♬",  "Music Software"),
-    ("licenses",        "⬡",  "License Vault"),
-    ("hardware",        "⬢",  "Hardware Inventory"),
-    ("midi",            "♩",  "MIDI Devices"),
-    ("mapper",          "⬡",  "Studio Mapper"),
+    ("plugins",            "◈",  "Plug-in Scanner"),
+    ("format_analysis",    "⊞",  "Format Analysis"),
+    ("plugin_health",      "◎",  "Plugin Health"),
+    ("cleanup",            "⊘",  "Cleanup Recommendations"),
+    ("music_software",     "♬",  "Music Software"),
+    ("migration",          "⇄",  "Migration Assistant"),
+    ("licenses",           "⬡",  "License Vault"),
+    ("hardware",           "⬢",  "Hardware Inventory"),
+    ("midi",               "♩",  "MIDI Devices"),
+    ("mapper",             "⬡",  "Studio Mapper"),
 ]
 
 
