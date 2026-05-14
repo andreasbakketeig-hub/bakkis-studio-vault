@@ -19,6 +19,7 @@ TEXT_MUTED = "#6B7280"
 NAV_ITEMS: list[tuple[str, str, str]] = [
     ("plugins",         "◈",  "Plug-in Scanner"),
     ("format_analysis", "⊞",  "Format Analysis"),
+    ("plugin_health",   "◎",  "Plugin Health"),
     ("licenses",        "⬡",  "License Vault"),
     ("hardware",        "⬢",  "Hardware Inventory"),
     ("midi",            "♩",  "MIDI Devices"),

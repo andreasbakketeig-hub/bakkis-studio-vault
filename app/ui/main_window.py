@@ -10,6 +10,7 @@ from app.core.scanner import Plugin
 from app.ui.sidebar import Sidebar
 from app.ui.views.plugin_scanner import PluginScannerView
 from app.ui.views.format_analysis import FormatAnalysisView
+from app.ui.views.plugin_health import PluginHealthView
 from app.ui.views.coming_soon import ComingSoonView
 
 BG_MAIN = "#0D0F18"
@@ -82,6 +83,8 @@ class MainWindow(ctk.CTk):
         self._plugins = plugins
         if "format_analysis" in self._views:
             self._views["format_analysis"].refresh(plugins)  # type: ignore[union-attr]
+        if "plugin_health" in self._views:
+            self._views["plugin_health"].refresh(plugins)  # type: ignore[union-attr]
 
     def _create_view(self, key: str) -> ctk.CTkFrame:
         match key:
@@ -92,6 +95,11 @@ class MainWindow(ctk.CTk):
                 )
             case "format_analysis":
                 view = FormatAnalysisView(self._content_area)
+                if self._plugins:
+                    view.refresh(self._plugins)
+                return view
+            case "plugin_health":
+                view = PluginHealthView(self._content_area)
                 if self._plugins:
                     view.refresh(self._plugins)
                 return view
