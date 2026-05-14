@@ -10,6 +10,8 @@ from pathlib import Path
 
 from app.core.scanner import Plugin
 
+HEADERS = ["Name", "Developer", "Version", "Format", "Size", "Modified", "Path"]
+
 
 def export_csv(plugins: list[Plugin], dest: Path | str | None = None) -> Path:
     """
@@ -27,8 +29,16 @@ def export_csv(plugins: list[Plugin], dest: Path | str | None = None) -> Path:
 
     with dest.open("w", newline="", encoding="utf-8") as fh:
         writer = csv.writer(fh)
-        writer.writerow(["Name", "Format", "Path"])
+        writer.writerow(HEADERS)
         for p in plugins:
-            writer.writerow([p.name, p.fmt, p.path])
+            writer.writerow([
+                p.name,
+                p.developer,
+                p.version,
+                p.fmt,
+                p.file_size_human,
+                p.modified,
+                p.path,
+            ])
 
     return dest

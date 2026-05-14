@@ -149,36 +149,17 @@ class PluginScannerView(ctk.CTkFrame):
     def _build_table(self) -> None:
         container = ctk.CTkFrame(self, fg_color=BG_CARD, corner_radius=12)
         container.grid(row=2, column=0, sticky="nsew", padx=28, pady=(0, 0))
-        container.grid_rowconfigure(1, weight=1)
+        container.grid_rowconfigure(2, weight=1)
         container.grid_columnconfigure(0, weight=1)
 
-        # Column headers
-        header = ctk.CTkFrame(container, fg_color="transparent", height=36)
-        header.grid(row=0, column=0, sticky="ew", padx=0, pady=(12, 0))
-        header.grid_columnconfigure(0, minsize=240, weight=1)
-        header.grid_columnconfigure(1, minsize=80)
-        header.grid_columnconfigure(2, minsize=400, weight=3)
-
-        for col_idx, (text, anchor) in enumerate(
-            [("Name", "w"), ("Format", "center"), ("Path", "w")]
-        ):
-            ctk.CTkLabel(
-                header,
-                text=text.upper(),
-                font=ctk.CTkFont(size=10, weight="bold"),
-                text_color=TEXT_MUTED,
-                anchor=anchor,
-            ).grid(row=0, column=col_idx, sticky="ew", padx=(20 if col_idx == 0 else 8, 8))
-
-        # Divider
+        # Divider below (invisible) header row
         ctk.CTkFrame(container, height=1, fg_color=BORDER).grid(
-            row=1, column=0, sticky="ew", padx=16
+            row=1, column=0, sticky="ew", padx=16, pady=(12, 0)
         )
 
         # Treeview inside a plain tk Frame (needed for scrollbar pairing)
         tree_frame = tk.Frame(container, bg=BG_TABLE)
         tree_frame.grid(row=2, column=0, sticky="nsew", padx=0, pady=0)
-        container.grid_rowconfigure(2, weight=1)
         tree_frame.grid_rowconfigure(0, weight=1)
         tree_frame.grid_columnconfigure(0, weight=1)
 
@@ -193,7 +174,14 @@ class PluginScannerView(ctk.CTkFrame):
             borderwidth=0,
             font=("SF Pro Text", 12),
         )
-        style.configure("Vault.Treeview.Heading", background=BG_TABLE, foreground=TEXT_MUTED)
+        style.configure(
+            "Vault.Treeview.Heading",
+            background=BG_TABLE,
+            foreground=TEXT_MUTED,
+            font=("SF Pro Text", 10),
+            relief="flat",
+            borderwidth=0,
+        )
         style.map(
             "Vault.Treeview",
             background=[("selected", BG_TABLE_SEL)],
@@ -201,27 +189,36 @@ class PluginScannerView(ctk.CTkFrame):
         )
         style.layout("Vault.Treeview", [("Vault.Treeview.treearea", {"sticky": "nswe"})])
 
+        # Columns: name · developer · version · fmt · size · modified · path
         self._tree = ttk.Treeview(
             tree_frame,
-            columns=("name", "fmt", "path"),
+            columns=("name", "developer", "version", "fmt", "size", "modified", "path"),
             show="headings",
             style="Vault.Treeview",
             selectmode="extended",
         )
-        self._tree.heading("name", text="")
-        self._tree.heading("fmt", text="")
-        self._tree.heading("path", text="")
-        self._tree.column("name", width=240, minwidth=160, stretch=True)
-        self._tree.column("fmt", width=80, minwidth=60, anchor="center", stretch=False)
-        self._tree.column("path", width=500, minwidth=300, stretch=True)
+        col_cfg = [
+            ("name",      "NAME",       200, True,  "w"),
+            ("developer", "DEVELOPER",  160, True,  "w"),
+            ("version",   "VERSION",     80, False, "center"),
+            ("fmt",       "FORMAT",      70, False, "center"),
+            ("size",      "SIZE",        75, False, "e"),
+            ("modified",  "MODIFIED",    95, False, "center"),
+            ("path",      "PATH",       340, True,  "w"),
+        ]
+        for col_id, heading, width, stretch, anchor in col_cfg:
+            self._tree.heading(col_id, text=heading)
+            self._tree.column(col_id, width=width, minwidth=50, stretch=stretch, anchor=anchor)
 
         vsb = ttk.Scrollbar(tree_frame, orient="vertical", command=self._tree.yview)
-        self._tree.configure(yscrollcommand=vsb.set)
+        hsb = ttk.Scrollbar(tree_frame, orient="horizontal", command=self._tree.xview)
+        self._tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
 
         self._tree.grid(row=0, column=0, sticky="nsew")
         vsb.grid(row=0, column=1, sticky="ns")
+        hsb.grid(row=1, column=0, sticky="ew")
 
-        # Alternate row colours
+        # Alternate row colours + format colour tags
         self._tree.tag_configure("even", background=BG_TABLE_ROW)
         self._tree.tag_configure("odd", background=BG_TABLE_ROW_ALT)
         for fmt, color in FMT_COLORS.items():
@@ -307,7 +304,7 @@ class PluginScannerView(ctk.CTkFrame):
         self._clear_table()
         for i, p in enumerate(plugins):
             tags = ["even" if i % 2 == 0 else "odd", f"fmt_{p.fmt}"]
-            self._tree.insert("", "end", values=(p.name, p.fmt, p.path), tags=tags)
+            self._tree.insert("", "end", values=p.row, tags=tags)
 
         if plugins:
             self._empty_label.grid_remove()
@@ -327,7 +324,12 @@ class PluginScannerView(ctk.CTkFrame):
         else:
             self._filtered = [
                 p for p in self._all_plugins
-                if q in p.name.lower() or q in p.fmt.lower() or q in p.path.lower()
+                if q in p.name.lower()
+                or q in p.fmt.lower()
+                or q in p.path.lower()
+                or q in p.developer.lower()
+                or q in p.version.lower()
+                or q in p.modified.lower()
             ]
         self._populate_table(self._filtered)
         displayed = humanize_count(len(self._filtered), "plug-in")
