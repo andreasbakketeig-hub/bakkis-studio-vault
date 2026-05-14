@@ -5,6 +5,7 @@ highlights plugins installed in multiple formats (VST / VST3 / AU / AAX).
 
 from __future__ import annotations
 
+import subprocess
 import tkinter as tk
 from tkinter import ttk
 
@@ -40,6 +41,7 @@ class FormatAnalysisView(ctk.CTkFrame):
     def __init__(self, parent: ctk.CTkFrame, **kwargs):
         super().__init__(parent, fg_color="transparent", **kwargs)
         self._groups: list[FormatGroup] = []
+        self._iid_to_group: dict[str, FormatGroup] = {}
         self._build()
 
     # ── Layout ────────────────────────────────────────────────────────────────
@@ -50,6 +52,7 @@ class FormatAnalysisView(ctk.CTkFrame):
 
         self._build_header()
         self._build_stats_row()
+        self._build_action_bar()
         self._build_table()
         self._build_statusbar()
         self._show_empty_state(initial=True)
@@ -113,6 +116,28 @@ class FormatAnalysisView(ctk.CTkFrame):
         )
         value_lbl.grid(row=1, column=0, sticky="w", padx=16, pady=(0, 14))
         return value_lbl
+
+    def _build_action_bar(self) -> None:
+        bar = ctk.CTkFrame(self, fg_color="transparent")
+        bar.grid(row=2, column=0, sticky="ew", padx=28, pady=(12, 0))
+        bar.grid_columnconfigure(0, weight=1)
+
+        self._reveal_btn = ctk.CTkButton(
+            bar,
+            text="⌘  Reveal in Finder",
+            width=160,
+            height=36,
+            corner_radius=8,
+            font=ctk.CTkFont(size=13),
+            fg_color=BG_CARD,
+            hover_color="#1C1F2E",
+            text_color=TEXT_MUTED,
+            border_width=1,
+            border_color=BORDER,
+            command=self._reveal_in_finder,
+            state="disabled",
+        )
+        self._reveal_btn.grid(row=0, column=1, sticky="e")
 
     def _build_table(self) -> None:
         container = ctk.CTkFrame(self, fg_color=BG_CARD, corner_radius=12)
@@ -215,6 +240,8 @@ class FormatAnalysisView(ctk.CTkFrame):
         self._tree.tag_configure("single_even", background=BG_TABLE_ROW,         foreground=TEXT_PRIMARY)
         self._tree.tag_configure("single_odd",  background=BG_TABLE_ROW_ALT,     foreground=TEXT_PRIMARY)
 
+        self._tree.bind("<<TreeviewSelect>>", self._on_tree_select)
+
         # Empty-state overlay (shown until data is loaded)
         self._empty_label = ctk.CTkLabel(
             container,
@@ -280,6 +307,8 @@ class FormatAnalysisView(ctk.CTkFrame):
     def _populate(self) -> None:
         for row in self._tree.get_children():
             self._tree.delete(row)
+        self._iid_to_group.clear()
+        self._reveal_btn.configure(state="disabled", text_color=TEXT_MUTED)
 
         duplicates = [g for g in self._groups if g.is_duplicate]
         total_redundant_formats = sum(len(g.formats) - 1 for g in duplicates)
@@ -305,7 +334,8 @@ class FormatAnalysisView(ctk.CTkFrame):
                 tag = "single_even" if single_i % 2 == 0 else "single_odd"
                 single_i += 1
 
-            self._tree.insert("", "end", values=values, tags=(tag,))
+            iid = self._tree.insert("", "end", values=values, tags=(tag,))
+            self._iid_to_group[iid] = g
 
         if self._groups:
             self._empty_label.grid_remove()
@@ -329,6 +359,27 @@ class FormatAnalysisView(ctk.CTkFrame):
         self._total_label.configure(
             text=f"{sum(len(g.formats) for g in self._groups):,} total format copies scanned"
         )
+
+
+    # ── Reveal in Finder ──────────────────────────────────────────────────────
+
+    def _on_tree_select(self, _event=None) -> None:
+        has_selection = bool(self._tree.selection())
+        state = "normal" if has_selection else "disabled"
+        color = TEXT_PRIMARY if has_selection else TEXT_MUTED
+        self._reveal_btn.configure(state=state, text_color=color)
+
+    def _reveal_in_finder(self) -> None:
+        selected = self._tree.selection()
+        if not selected:
+            return
+        group = self._iid_to_group.get(selected[0])
+        if not group:
+            return
+        # Pick the first available plugin path from the group
+        plugin = next(iter(group.formats.values()), None)
+        if plugin and plugin.path:
+            subprocess.run(["open", "-R", plugin.path], check=False)
 
 
 # ── Utility ───────────────────────────────────────────────────────────────────

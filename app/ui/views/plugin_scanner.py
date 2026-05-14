@@ -4,6 +4,7 @@ Plug-in Scanner view — scan, browse, search, and export audio plug-ins.
 
 from __future__ import annotations
 
+import subprocess
 import threading
 import tkinter as tk
 from tkinter import messagebox, ttk
@@ -152,6 +153,24 @@ class PluginScannerView(ctk.CTkFrame):
         )
         self._export_btn.grid(row=0, column=2, sticky="e", padx=(12, 0))
 
+        # Reveal in Finder button
+        self._reveal_btn = ctk.CTkButton(
+            bar,
+            text="⌘  Reveal in Finder",
+            width=160,
+            height=40,
+            corner_radius=8,
+            font=ctk.CTkFont(size=13),
+            fg_color=BG_CARD,
+            hover_color="#1C1F2E",
+            text_color=TEXT_MUTED,
+            border_width=1,
+            border_color=BORDER,
+            command=self._reveal_in_finder,
+            state="disabled",
+        )
+        self._reveal_btn.grid(row=0, column=3, sticky="e", padx=(8, 0))
+
     def _build_table(self) -> None:
         container = ctk.CTkFrame(self, fg_color=BG_CARD, corner_radius=12)
         container.grid(row=2, column=0, sticky="nsew", padx=28, pady=(0, 0))
@@ -229,6 +248,8 @@ class PluginScannerView(ctk.CTkFrame):
         self._tree.tag_configure("odd", background=BG_TABLE_ROW_ALT)
         for fmt, color in FMT_COLORS.items():
             self._tree.tag_configure(f"fmt_{fmt}", foreground=color)
+
+        self._tree.bind("<<TreeviewSelect>>", self._on_tree_select)
 
         # Empty-state overlay
         self._empty_label = ctk.CTkLabel(
@@ -308,6 +329,7 @@ class PluginScannerView(ctk.CTkFrame):
     def _clear_table(self) -> None:
         for row in self._tree.get_children():
             self._tree.delete(row)
+        self._reveal_btn.configure(state="disabled", text_color=TEXT_MUTED)
 
     def _populate_table(self, plugins: list[Plugin]) -> None:
         self._clear_table()
@@ -345,6 +367,23 @@ class PluginScannerView(ctk.CTkFrame):
         total = len(self._all_plugins)
         suffix = f" of {total:,}" if q and len(self._filtered) != total else ""
         self._count_label.configure(text=f"{displayed}{suffix}")
+
+    # ── Reveal in Finder ──────────────────────────────────────────────────────
+
+    def _on_tree_select(self, _event=None) -> None:
+        has_selection = bool(self._tree.selection())
+        state = "normal" if has_selection else "disabled"
+        color = TEXT_PRIMARY if has_selection else TEXT_MUTED
+        self._reveal_btn.configure(state=state, text_color=color)
+
+    def _reveal_in_finder(self) -> None:
+        selected = self._tree.selection()
+        if not selected:
+            return
+        # PATH is column index 6 in the values tuple
+        path = self._tree.item(selected[0], "values")[6]
+        if path:
+            subprocess.run(["open", "-R", path], check=False)
 
     # ── Export ────────────────────────────────────────────────────────────────
 
