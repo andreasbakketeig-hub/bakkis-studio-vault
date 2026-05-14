@@ -11,18 +11,98 @@ from dataclasses import dataclass
 
 from app.core.scanner import FormatGroup, Plugin, _fmt_size, analyze_formats
 
-# ── Preferred format order (user-configurable, this is the default) ───────────
-
-PREFERRED_FORMATS: list[str] = ["VST3", "AU", "VST", "AAX"]
-
 # ── Confidence levels ─────────────────────────────────────────────────────────
 
 CONF_SAFE    = "Safe"
 CONF_REVIEW  = "Review"
 CONF_UNKNOWN = "Unknown"
 
-# Minimum recoverable bytes to be considered "high disk usage"
+# Minimum recoverable bytes to flag as "high disk usage"
 HIGH_DISK_THRESHOLD = 50 * 1024 * 1024  # 50 MB
+
+# ── DAW profile keys ──────────────────────────────────────────────────────────
+
+PROFILE_LOGIC     = "logic"
+PROFILE_ABLETON   = "ableton"
+PROFILE_CUBASE    = "cubase"
+PROFILE_PRO_TOOLS = "pro_tools"
+PROFILE_CUSTOM    = "custom"
+
+
+@dataclass(frozen=True)
+class DawProfile:
+    """
+    Describes which plugin formats a DAW prefers and which must never
+    be flagged for removal.
+
+    preferred    — formats the DAW uses, in priority order.  Only preferred
+                   formats are placed in the "keep" column; everything else
+                   becomes a candidate for the "suggested removal" column.
+    never_remove — hard safety guard: these formats are NEVER placed in the
+                   redundant list regardless of what other logic says.
+    """
+    key: str
+    name: str
+    preferred: list[str]
+    never_remove: list[str]
+    description: str = ""
+
+
+DAW_PROFILES: list[DawProfile] = [
+    DawProfile(
+        key=PROFILE_LOGIC,
+        name="Logic Pro",
+        preferred=["AU"],
+        never_remove=["AU"],
+        description="AU preferred  ·  VST / VST3 / AAX suggested when AU is present",
+    ),
+    DawProfile(
+        key=PROFILE_ABLETON,
+        name="Ableton Live",
+        preferred=["VST3", "AU"],
+        never_remove=[],
+        description="VST3 + AU preferred  ·  VST suggested when VST3 or AU is present",
+    ),
+    DawProfile(
+        key=PROFILE_CUBASE,
+        name="Cubase / Nuendo",
+        preferred=["VST3"],
+        never_remove=[],
+        description="VST3 preferred  ·  VST suggested when VST3 is present",
+    ),
+    DawProfile(
+        key=PROFILE_PRO_TOOLS,
+        name="Pro Tools",
+        preferred=["AAX"],
+        never_remove=["AAX"],
+        description="AAX preferred  ·  other formats suggested when AAX is present",
+    ),
+    DawProfile(
+        key=PROFILE_CUSTOM,
+        name="Custom",
+        preferred=["VST3", "AU"],   # overridden at analysis time from UI checkboxes
+        never_remove=[],
+        description="Choose your preferred formats manually",
+    ),
+]
+
+_PROFILE_BY_KEY: dict[str, DawProfile] = {p.key: p for p in DAW_PROFILES}
+
+
+def get_profile(key: str) -> DawProfile:
+    """Return the :class:`DawProfile` for *key*, defaulting to Ableton Live."""
+    return _PROFILE_BY_KEY.get(key, DAW_PROFILES[1])
+
+
+def make_custom_profile(preferred: list[str]) -> DawProfile:
+    """Build a Custom :class:`DawProfile` with the given *preferred* list."""
+    return DawProfile(
+        key=PROFILE_CUSTOM,
+        name="Custom",
+        preferred=preferred,
+        never_remove=[],
+        description="Custom preferred formats: " + "  ·  ".join(preferred) if preferred else "No formats selected",
+    )
 
 
 # ── Data model ────────────────────────────────────────────────────────────────
@@ -40,7 +120,7 @@ class CleanupRecommendation:
 
     @property
     def recoverable_size(self) -> int:
-        """Total bytes that could be freed by removing redundant formats."""
+        """Total bytes that could be freed by removing the redundant formats."""
         return sum(
             self.installed_formats[fmt].file_size
             for fmt in self.redundant_formats
@@ -68,50 +148,59 @@ class CleanupRecommendation:
         return self.recoverable_size >= HIGH_DISK_THRESHOLD
 
 
-# ── Recommendation engine ─────────────────────────────────────────────────────
+# ── Confidence engine ─────────────────────────────────────────────────────────
 
-def _assess_confidence(keep: list[str], redundant: list[str]) -> str:
+def _fmt_confidence(fmt: str, keep: list[str], profile: DawProfile) -> str:
     """
-    Determine confidence for a recommendation given which formats to keep
-    and which are flagged as redundant.
+    Assess confidence for removing a single *fmt* given *keep* and *profile*.
 
-    Rules (in order):
-    - Safe   — VST is redundant and VST3 is being kept (clear supersession)
-    - Safe   — AU is redundant and VST3 is kept, no AAX involved
-    - Review — AAX is in the redundant list (may be needed for Pro Tools)
-    - Safe   — only legacy formats (VST) redundant while modern (VST3/AU) kept
-    - Review — anything else that has redundancy
+    Rules (checked in order):
+    1. AAX outside Pro Tools → always Review  (may be needed for Pro Tools)
+    2. VST when VST3 or AU is kept → Safe  (clearly superseded by modern format)
+    3. Format not in this profile's preferred list, but the profile's preferred
+       IS present in keep → Safe  (the DAW's required format is satisfied; this
+       format is genuinely redundant for that workflow)
+    4. Anything else → Review
     """
-    if not redundant:
-        return CONF_UNKNOWN
-
-    redundant_set = set(redundant)
     keep_set = set(keep)
 
-    # AAX is always Review — cannot safely remove without knowing Pro Tools usage
-    if "AAX" in redundant_set:
+    # Rule 1 — AAX outside Pro Tools is never Safe
+    if fmt == "AAX" and profile.key != PROFILE_PRO_TOOLS:
         return CONF_REVIEW
 
-    # VST superseded by VST3 → Safe
-    if redundant_set == {"VST"} and "VST3" in keep_set:
+    # Rule 2 — VST clearly superseded when VST3 or AU kept
+    if fmt == "VST" and (keep_set & {"VST3", "AU"}):
         return CONF_SAFE
 
-    # AU + VST redundant while VST3 kept → Safe (no AAX involved)
-    if "VST3" in keep_set and not (redundant_set & {"AAX"}):
+    # Rule 3 — format not needed by this profile, but profile's format is present
+    if fmt not in profile.preferred and (keep_set & set(profile.preferred)):
         return CONF_SAFE
 
     return CONF_REVIEW
 
 
-def _recommend(
-    group: FormatGroup,
-    preferred: list[str],
-) -> CleanupRecommendation:
+def _assess_confidence(keep: list[str], redundant: list[str], profile: DawProfile) -> str:
+    """
+    Return the most conservative confidence across all *redundant* formats.
+    A single Review entry makes the whole recommendation Review.
+    """
+    if not redundant:
+        return CONF_UNKNOWN
+
+    for fmt in redundant:
+        if _fmt_confidence(fmt, keep, profile) == CONF_REVIEW:
+            return CONF_REVIEW
+    return CONF_SAFE
+
+
+# ── Recommendation engine ─────────────────────────────────────────────────────
+
+def _recommend(group: FormatGroup, profile: DawProfile) -> CleanupRecommendation:
     """Build a :class:`CleanupRecommendation` for one :class:`FormatGroup`."""
     installed = set(group.formats.keys())
 
+    # ── Single format: nothing to suggest ────────────────────────────────────
     if len(installed) <= 1:
-        # Single format — nothing to flag
         return CleanupRecommendation(
             product_name=group.product_name,
             developer=group.developer,
@@ -121,17 +210,46 @@ def _recommend(
             confidence=CONF_UNKNOWN,
         )
 
-    # Formats to keep: preferred order filtered to what's actually installed
-    keep = [f for f in preferred if f in installed]
+    # ── Determine keep set ────────────────────────────────────────────────────
+    # Keep formats that the profile prefers AND are actually installed.
+    # This is the core fix: preferred is a SHORT DAW-specific list, so other
+    # formats installed naturally fall into the redundant column.
+    preferred_present = [f for f in profile.preferred if f in installed]
 
-    if not keep:
-        # None of the preferred formats installed — keep everything, flag unknown
-        keep = sorted(installed)
-        redundant: list[str] = []
-        confidence = CONF_UNKNOWN
-    else:
-        redundant = [f for f in installed if f not in keep]
-        confidence = _assess_confidence(keep, redundant)
+    if not preferred_present:
+        # The profile's preferred formats aren't installed — cannot make a
+        # safe recommendation; keep everything and flag as Unknown.
+        return CleanupRecommendation(
+            product_name=group.product_name,
+            developer=group.developer,
+            installed_formats=dict(group.formats),
+            keep_formats=sorted(installed),
+            redundant_formats=[],
+            confidence=CONF_UNKNOWN,
+        )
+
+    keep = preferred_present[:]
+
+    # never_remove formats that aren't already in keep still go into keep
+    # (they must appear in the "keep" column even if not in preferred)
+    for f in profile.never_remove:
+        if f in installed and f not in keep:
+            keep.append(f)
+
+    # Redundant = installed formats not in keep
+    redundant = [f for f in installed if f not in keep]
+
+    if not redundant:
+        return CleanupRecommendation(
+            product_name=group.product_name,
+            developer=group.developer,
+            installed_formats=dict(group.formats),
+            keep_formats=keep,
+            redundant_formats=[],
+            confidence=CONF_UNKNOWN,
+        )
+
+    confidence = _assess_confidence(keep, redundant, profile)
 
     return CleanupRecommendation(
         product_name=group.product_name,
@@ -145,20 +263,24 @@ def _recommend(
 
 def analyze_cleanup(
     plugins: list[Plugin],
-    preferred: list[str] | None = None,
+    profile: DawProfile | None = None,
 ) -> list[CleanupRecommendation]:
     """
     Analyze *plugins* and return one :class:`CleanupRecommendation` per
-    logical product.
+    logical product under the given *profile*.
 
     Results are sorted: items with redundant formats first (by recoverable
     space descending), then single-format products alphabetically.
+
+    Defaults to the Ableton Live profile when *profile* is None, since its
+    [VST3, AU] preferred list generates useful recommendations immediately
+    for the most common multi-format installs.
     """
-    if preferred is None:
-        preferred = PREFERRED_FORMATS
+    if profile is None:
+        profile = get_profile(PROFILE_ABLETON)
 
     groups = analyze_formats(plugins)
-    recs = [_recommend(g, preferred) for g in groups]
+    recs = [_recommend(g, profile) for g in groups]
 
     with_redundant = sorted(
         [r for r in recs if r.has_redundant],
