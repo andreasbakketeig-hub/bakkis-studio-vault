@@ -8,6 +8,7 @@ from __future__ import annotations
 import datetime
 import os
 import plistlib
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -69,6 +70,78 @@ class ScanResult:
     @property
     def count(self) -> int:
         return len(self.plugins)
+
+
+# ── Format-group analysis ─────────────────────────────────────────────────────
+
+_FORMAT_PRIORITY: list[str] = ["VST3", "AU", "VST", "AAX"]
+
+
+def _normalize_product_name(name: str) -> str:
+    """Strip common format suffixes so the same product groups across formats."""
+    cleaned = re.sub(r"[\s_\-]*(vst3?|au|aax)\s*$", "", name, flags=re.IGNORECASE).strip()
+    return (cleaned or name).lower()
+
+
+@dataclass
+class FormatGroup:
+    """One logical product that may exist in several format copies."""
+
+    product_name: str
+    developer: str
+    formats: dict[str, Plugin]  # fmt -> representative Plugin
+
+    @property
+    def is_duplicate(self) -> bool:
+        return len(self.formats) > 1
+
+    @property
+    def total_size(self) -> int:
+        return sum(p.file_size for p in self.formats.values())
+
+    @property
+    def redundant_size(self) -> int:
+        """Bytes that could be reclaimed by keeping only the largest copy."""
+        if not self.is_duplicate:
+            return 0
+        sizes = sorted(p.file_size for p in self.formats.values())
+        return sum(sizes[:-1])
+
+    @property
+    def format_names(self) -> list[str]:
+        present = set(self.formats.keys())
+        ordered = [f for f in _FORMAT_PRIORITY if f in present]
+        ordered += sorted(present - set(_FORMAT_PRIORITY))
+        return ordered
+
+
+def analyze_formats(plugins: list[Plugin]) -> list[FormatGroup]:
+    """
+    Group *plugins* by normalised product name and return one
+    :class:`FormatGroup` per logical product, sorted alphabetically.
+    """
+    raw: dict[str, dict] = {}
+    for plugin in plugins:
+        key = _normalize_product_name(plugin.name)
+        if key not in raw:
+            raw[key] = {
+                "product_name": plugin.name,
+                "developer": plugin.developer,
+                "formats": {},
+            }
+        raw[key]["formats"][plugin.fmt] = plugin
+        if not raw[key]["developer"] and plugin.developer:
+            raw[key]["developer"] = plugin.developer
+
+    groups = [
+        FormatGroup(
+            product_name=g["product_name"],
+            developer=g["developer"],
+            formats=g["formats"],
+        )
+        for g in raw.values()
+    ]
+    return sorted(groups, key=lambda g: g.product_name.lower())
 
 
 # ── Scanner ───────────────────────────────────────────────────────────────────

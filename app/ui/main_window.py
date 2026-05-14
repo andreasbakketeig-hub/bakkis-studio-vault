@@ -6,8 +6,10 @@ from __future__ import annotations
 
 import customtkinter as ctk
 
+from app.core.scanner import Plugin
 from app.ui.sidebar import Sidebar
 from app.ui.views.plugin_scanner import PluginScannerView
+from app.ui.views.format_analysis import FormatAnalysisView
 from app.ui.views.coming_soon import ComingSoonView
 
 BG_MAIN = "#0D0F18"
@@ -36,6 +38,7 @@ class MainWindow(ctk.CTk):
 
         self._views: dict[str, ctk.CTkFrame] = {}
         self._active_key: str = ""
+        self._plugins: list[Plugin] = []
 
         self._build()
         self._navigate("plugins")
@@ -74,9 +77,23 @@ class MainWindow(ctk.CTk):
         self._active_key = key
         self._sidebar.activate(key)
 
+    def _on_plugins_ready(self, plugins: list[Plugin]) -> None:
+        """Called by PluginScannerView when a scan completes."""
+        self._plugins = plugins
+        if "format_analysis" in self._views:
+            self._views["format_analysis"].refresh(plugins)  # type: ignore[union-attr]
+
     def _create_view(self, key: str) -> ctk.CTkFrame:
         match key:
             case "plugins":
-                return PluginScannerView(self._content_area)
+                return PluginScannerView(
+                    self._content_area,
+                    on_plugins_ready=self._on_plugins_ready,
+                )
+            case "format_analysis":
+                view = FormatAnalysisView(self._content_area)
+                if self._plugins:
+                    view.refresh(self._plugins)
+                return view
             case _:
                 return ComingSoonView(self._content_area, module_key=key)

@@ -8,7 +8,7 @@ import threading
 import tkinter as tk
 from tkinter import messagebox, ttk
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 import customtkinter as ctk
 
@@ -39,9 +39,15 @@ FMT_COLORS: dict[str, str] = {
 class PluginScannerView(ctk.CTkFrame):
     """Main content frame for the Plug-in Scanner module."""
 
-    def __init__(self, parent: ctk.CTkFrame, **kwargs):
+    def __init__(
+        self,
+        parent: ctk.CTkFrame,
+        on_plugins_ready: Optional[Callable[[list[Plugin]], None]] = None,
+        **kwargs,
+    ):
         super().__init__(parent, fg_color="transparent", **kwargs)
 
+        self._on_plugins_ready = on_plugins_ready
         self._all_plugins: list[Plugin] = []
         self._filtered: list[Plugin] = []
         self._scan_result: Optional[ScanResult] = None
@@ -281,6 +287,9 @@ class PluginScannerView(ctk.CTkFrame):
         self._all_plugins = result.plugins
         self._scanning = False
         self._scan_btn.configure(state="normal", text="  ◈  Scan Plugins")
+
+        if self._on_plugins_ready:
+            self._on_plugins_ready(self._all_plugins)
 
         if self._all_plugins:
             self._export_btn.configure(state="normal", text_color=TEXT_PRIMARY)
