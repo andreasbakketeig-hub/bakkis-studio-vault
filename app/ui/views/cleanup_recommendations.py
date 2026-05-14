@@ -26,29 +26,32 @@ from app.core.cleanup import (
 )
 from app.core.scanner import Plugin, _fmt_size
 
-# ── Palette ───────────────────────────────────────────────────────────────────
-
-BG_CARD          = "#13161F"
-BG_TABLE         = "#0D0F18"
-BG_TABLE_ROW     = "#13161F"
-BG_TABLE_ROW_ALT = "#161924"
-BG_TABLE_SEL     = "#1E2A4A"
+# ── Design System ─────────────────────────────────────────────────────────────
+BG_CARD          = "#131720"
+BG_CARD_INNER    = "#181D2C"
+BG_TABLE         = "#0D1020"
+BG_TABLE_ROW     = "#131720"
+BG_TABLE_ROW_ALT = "#161B28"
+BG_TABLE_SEL     = "#1B2848"
 ACCENT           = "#6C8EF5"
 ACCENT_HOVER     = "#8BAAF7"
-ACCENT_GREEN     = "#7ED321"
-ACCENT_WARN      = "#F5A623"
-ACCENT_SAFE      = "#7ED321"
-ACCENT_REVIEW    = "#F5A623"
-ACCENT_UNKNOWN   = "#6B7280"
-TEXT_PRIMARY     = "#E8EAF0"
-TEXT_MUTED       = "#6B7280"
-BORDER           = "#1C1F2E"
+ACCENT_DIM       = "#1A2545"
+ACCENT_GREEN     = "#4ADE80"
+ACCENT_WARN      = "#F59E0B"
+ACCENT_SAFE      = "#4ADE80"
+ACCENT_REVIEW    = "#F59E0B"
+ACCENT_UNKNOWN   = "#94A3B8"
+TEXT_PRIMARY     = "#EEF0F8"
+TEXT_SECONDARY   = "#94A3B8"
+TEXT_MUTED       = "#4B5870"
+BORDER           = "#1C2038"
+BORDER_BRIGHT    = "#242B48"
 
 FMT_COLORS: dict[str, str] = {
-    "VST":  "#F5A623",
-    "VST3": "#7ED321",
-    "AU":   "#4A90E2",
-    "AAX":  "#BD10E0",
+    "VST":  "#F59E0B",
+    "VST3": "#4ADE80",
+    "AU":   "#60A5FA",
+    "AAX":  "#A855F7",
 }
 
 CONF_COLORS: dict[str, str] = {
@@ -57,10 +60,7 @@ CONF_COLORS: dict[str, str] = {
     CONF_UNKNOWN: ACCENT_UNKNOWN,
 }
 
-# Custom profile format order for checkboxes
 _CUSTOM_FMT_ORDER: list[str] = ["VST3", "AU", "VST", "AAX"]
-
-# ── Filter definitions ────────────────────────────────────────────────────────
 
 FILTER_ALL       = "all"
 FILTER_SAFE      = "safe"
@@ -72,11 +72,10 @@ _FILTERS: list[tuple[str, str]] = [
     (FILTER_ALL,       "All"),
     (FILTER_SAFE,      "Safe"),
     (FILTER_REVIEW,    "Review"),
-    (FILTER_HIGH_DISK, "High Disk Usage"),
+    (FILTER_HIGH_DISK, "High Disk"),
     (FILTER_MULTI,     "Multi-Format"),
 ]
 
-# Row grid indices
 _ROW_HEADER  = 0
 _ROW_PROFILE = 1
 _ROW_STATS   = 2
@@ -86,10 +85,7 @@ _ROW_STATUS  = 5
 
 
 class CleanupRecommendationsView(ctk.CTkFrame):
-    """
-    Cleanup Recommendations module — read-only analysis of plugin format
-    redundancy with DAW-profile-aware, confidence-rated suggestions.
-    """
+    """Cleanup Recommendations — read-only analysis of plugin format redundancy."""
 
     def __init__(self, parent: ctk.CTkFrame, **kwargs):
         super().__init__(parent, fg_color="transparent", **kwargs)
@@ -102,7 +98,6 @@ class CleanupRecommendationsView(ctk.CTkFrame):
         self._profile_btns: dict[str, ctk.CTkButton] = {}
         self._iid_to_rec: dict[str, CleanupRecommendation] = {}
 
-        # Custom profile checkbox state — default mirrors Ableton (VST3 + AU)
         self._custom_vars: dict[str, tk.BooleanVar] = {
             "VST3": tk.BooleanVar(value=True),
             "AU":   tk.BooleanVar(value=True),
@@ -111,8 +106,6 @@ class CleanupRecommendationsView(ctk.CTkFrame):
         }
 
         self._build()
-
-    # ── Layout ────────────────────────────────────────────────────────────────
 
     def _build(self) -> None:
         self.grid_columnconfigure(0, weight=1)
@@ -126,17 +119,15 @@ class CleanupRecommendationsView(ctk.CTkFrame):
         self._build_statusbar()
         self._show_empty_state(initial=True)
 
-    # ── Header ────────────────────────────────────────────────────────────────
-
     def _build_header(self) -> None:
         header = ctk.CTkFrame(self, fg_color="transparent")
-        header.grid(row=_ROW_HEADER, column=0, sticky="ew", padx=28, pady=(28, 0))
+        header.grid(row=_ROW_HEADER, column=0, sticky="ew", padx=30, pady=(28, 0))
         header.grid_columnconfigure(1, weight=1)
 
         ctk.CTkLabel(
             header,
             text="Cleanup Recommendations",
-            font=ctk.CTkFont(size=22, weight="bold"),
+            font=ctk.CTkFont(family="SF Pro Display", size=22, weight="bold"),
             text_color=TEXT_PRIMARY,
         ).grid(row=0, column=0, sticky="w")
 
@@ -145,56 +136,52 @@ class CleanupRecommendationsView(ctk.CTkFrame):
             text="Safe format-redundancy suggestions  ·  No files are deleted",
             font=ctk.CTkFont(size=12),
             text_color=TEXT_MUTED,
-        ).grid(row=1, column=0, sticky="w", pady=(2, 0))
+        ).grid(row=1, column=0, sticky="w", pady=(3, 0))
 
-        # Confidence legend — right side
         legend = ctk.CTkFrame(header, fg_color="transparent")
         legend.grid(row=0, column=1, rowspan=2, sticky="e")
 
-        for conf, color in CONF_COLORS.items():
-            ctk.CTkLabel(
-                legend,
-                text=f"  ● {conf}",
-                font=ctk.CTkFont(size=11),
-                text_color=color,
-            ).pack(side="right", padx=(0, 4))
-
         ctk.CTkLabel(
-            legend,
-            text="Confidence:",
-            font=ctk.CTkFont(size=11),
-            text_color=TEXT_MUTED,
+            legend, text="Confidence:",
+            font=ctk.CTkFont(size=11), text_color=TEXT_MUTED,
         ).pack(side="right")
 
-    # ── DAW Profile bar ───────────────────────────────────────────────────────
+        for conf, color in CONF_COLORS.items():
+            badge = ctk.CTkFrame(legend, fg_color=BORDER_BRIGHT, corner_radius=6)
+            badge.pack(side="right", padx=(4, 0))
+            ctk.CTkLabel(
+                badge, text=f"● {conf}",
+                font=ctk.CTkFont(size=10), text_color=color,
+            ).pack(padx=8, pady=4)
 
     def _build_profile_bar(self) -> None:
-        card = ctk.CTkFrame(self, fg_color=BG_CARD, corner_radius=10)
-        card.grid(row=_ROW_PROFILE, column=0, sticky="ew", padx=28, pady=(16, 0))
+        card = ctk.CTkFrame(
+            self, fg_color=BG_CARD, corner_radius=12,
+            border_width=1, border_color=BORDER,
+        )
+        card.grid(row=_ROW_PROFILE, column=0, sticky="ew", padx=30, pady=(16, 0))
         card.grid_columnconfigure(1, weight=1)
 
         ctk.CTkLabel(
-            card,
-            text="DAW Profile",
+            card, text="DAW Profile",
             font=ctk.CTkFont(size=11, weight="bold"),
             text_color=TEXT_MUTED,
-        ).grid(row=0, column=0, padx=(16, 14), pady=(12, 0), sticky="w")
+        ).grid(row=0, column=0, padx=(18, 14), pady=(13, 0), sticky="w")
 
-        # Profile button row
         btn_row = ctk.CTkFrame(card, fg_color="transparent")
-        btn_row.grid(row=0, column=1, sticky="w", padx=(0, 16), pady=(10, 0))
+        btn_row.grid(row=0, column=1, sticky="w", padx=(0, 16), pady=(11, 0))
 
         for profile in DAW_PROFILES:
             is_active = profile.key == self._active_profile_key
             btn = ctk.CTkButton(
                 btn_row,
                 text=profile.name,
-                width=118,
+                width=115,
                 height=30,
-                corner_radius=7,
+                corner_radius=8,
                 font=ctk.CTkFont(size=12),
-                fg_color=ACCENT if is_active else "#1C1F2E",
-                hover_color=ACCENT_HOVER if is_active else "#252840",
+                fg_color=ACCENT if is_active else BG_CARD_INNER,
+                hover_color=ACCENT_HOVER if is_active else BORDER_BRIGHT,
                 text_color=TEXT_PRIMARY if is_active else TEXT_MUTED,
                 border_width=1,
                 border_color=BORDER,
@@ -203,7 +190,6 @@ class CleanupRecommendationsView(ctk.CTkFrame):
             btn.pack(side="left", padx=(0, 6))
             self._profile_btns[profile.key] = btn
 
-        # Description label (row 1, below buttons)
         self._profile_desc_label = ctk.CTkLabel(
             card,
             text=get_profile(self._active_profile_key).description,
@@ -212,17 +198,14 @@ class CleanupRecommendationsView(ctk.CTkFrame):
             anchor="w",
         )
         self._profile_desc_label.grid(
-            row=1, column=0, columnspan=2, sticky="w", padx=16, pady=(4, 10)
+            row=1, column=0, columnspan=2, sticky="w", padx=18, pady=(4, 12),
         )
 
-        # Custom format checkboxes (hidden until Custom is active)
         self._custom_fmt_frame = ctk.CTkFrame(card, fg_color="transparent")
-
         ctk.CTkLabel(
             self._custom_fmt_frame,
             text="Preferred formats:",
-            font=ctk.CTkFont(size=11),
-            text_color=TEXT_MUTED,
+            font=ctk.CTkFont(size=11), text_color=TEXT_MUTED,
         ).pack(side="left", padx=(0, 10))
 
         for fmt in _CUSTOM_FMT_ORDER:
@@ -238,13 +221,11 @@ class CleanupRecommendationsView(ctk.CTkFrame):
                 border_color=BORDER,
                 command=self._on_custom_format_change,
             )
-            cb.pack(side="left", padx=(0, 16))
-
-    # ── Stats row ─────────────────────────────────────────────────────────────
+            cb.pack(side="left", padx=(0, 14))
 
     def _build_stats_row(self) -> None:
         row = ctk.CTkFrame(self, fg_color="transparent")
-        row.grid(row=_ROW_STATS, column=0, sticky="ew", padx=28, pady=(14, 0))
+        row.grid(row=_ROW_STATS, column=0, sticky="ew", padx=30, pady=(14, 0))
         for i in range(4):
             row.grid_columnconfigure(i, weight=1, uniform="cstat")
 
@@ -261,46 +242,43 @@ class CleanupRecommendationsView(ctk.CTkFrame):
         initial: str,
         color: str,
     ) -> ctk.CTkLabel:
-        pad = (0, 12) if col < 3 else (0, 0)
-        card = ctk.CTkFrame(parent, fg_color=BG_CARD, corner_radius=10)
+        pad = (0, 10) if col < 3 else (0, 0)
+        card = ctk.CTkFrame(
+            parent, fg_color=BG_CARD, corner_radius=12,
+            border_width=1, border_color=BORDER,
+        )
         card.grid(row=0, column=col, sticky="ew", padx=pad)
         card.grid_columnconfigure(0, weight=1)
 
         ctk.CTkLabel(
-            card,
-            text=label,
+            card, text=label,
             font=ctk.CTkFont(size=10, weight="bold"),
-            text_color=TEXT_MUTED,
-            anchor="w",
-        ).grid(row=0, column=0, sticky="w", padx=16, pady=(14, 2))
+            text_color=TEXT_MUTED, anchor="w",
+        ).grid(row=0, column=0, sticky="w", padx=18, pady=(16, 2))
 
         lbl = ctk.CTkLabel(
-            card,
-            text=initial,
-            font=ctk.CTkFont(size=26, weight="bold"),
-            text_color=color,
-            anchor="w",
+            card, text=initial,
+            font=ctk.CTkFont(size=28, weight="bold"),
+            text_color=color, anchor="w",
         )
-        lbl.grid(row=1, column=0, sticky="w", padx=16, pady=(0, 14))
+        lbl.grid(row=1, column=0, sticky="w", padx=18, pady=(0, 16))
         return lbl
-
-    # ── Filter bar ────────────────────────────────────────────────────────────
 
     def _build_filter_bar(self) -> None:
         bar = ctk.CTkFrame(self, fg_color="transparent")
-        bar.grid(row=_ROW_FILTERS, column=0, sticky="ew", padx=28, pady=(12, 0))
+        bar.grid(row=_ROW_FILTERS, column=0, sticky="ew", padx=30, pady=(12, 0))
 
         for key, label in _FILTERS:
             is_active = key == FILTER_ALL
             btn = ctk.CTkButton(
                 bar,
                 text=label,
-                width=130,
+                width=120,
                 height=32,
-                corner_radius=8,
+                corner_radius=9,
                 font=ctk.CTkFont(size=12),
                 fg_color=ACCENT if is_active else BG_CARD,
-                hover_color=ACCENT_HOVER if is_active else "#1C1F2E",
+                hover_color=ACCENT_HOVER if is_active else BORDER_BRIGHT,
                 text_color=TEXT_PRIMARY if is_active else TEXT_MUTED,
                 border_width=1,
                 border_color=BORDER,
@@ -309,16 +287,17 @@ class CleanupRecommendationsView(ctk.CTkFrame):
             btn.pack(side="left", padx=(0, 8))
             self._filter_btns[key] = btn
 
-    # ── Table ─────────────────────────────────────────────────────────────────
-
     def _build_table(self) -> None:
-        container = ctk.CTkFrame(self, fg_color=BG_CARD, corner_radius=12)
-        container.grid(row=_ROW_TABLE, column=0, sticky="nsew", padx=28, pady=(12, 0))
+        container = ctk.CTkFrame(
+            self, fg_color=BG_CARD, corner_radius=14,
+            border_width=1, border_color=BORDER,
+        )
+        container.grid(row=_ROW_TABLE, column=0, sticky="nsew", padx=30, pady=(12, 0))
         container.grid_rowconfigure(1, weight=1)
         container.grid_columnconfigure(0, weight=1)
 
         ctk.CTkFrame(container, height=1, fg_color=BORDER).grid(
-            row=0, column=0, sticky="ew", padx=16, pady=(12, 0)
+            row=0, column=0, sticky="ew", padx=16, pady=(12, 0),
         )
 
         tree_frame = tk.Frame(container, bg=BG_TABLE)
@@ -353,11 +332,8 @@ class CleanupRecommendationsView(ctk.CTkFrame):
 
         columns = ("name", "developer", "installed", "keep", "redundant", "space", "confidence")
         self._tree = ttk.Treeview(
-            tree_frame,
-            columns=columns,
-            show="headings",
-            style="Cleanup.Treeview",
-            selectmode="browse",
+            tree_frame, columns=columns,
+            show="headings", style="Cleanup.Treeview", selectmode="browse",
         )
 
         col_cfg = [
@@ -376,7 +352,6 @@ class CleanupRecommendationsView(ctk.CTkFrame):
         vsb = ttk.Scrollbar(tree_frame, orient="vertical",   command=self._tree.yview)
         hsb = ttk.Scrollbar(tree_frame, orient="horizontal", command=self._tree.xview)
         self._tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
-
         self._tree.grid(row=0, column=0, sticky="nsew")
         vsb.grid(row=0, column=1, sticky="ns")
         hsb.grid(row=1, column=0, sticky="ew")
@@ -384,45 +359,37 @@ class CleanupRecommendationsView(ctk.CTkFrame):
         for conf, color in CONF_COLORS.items():
             self._tree.tag_configure(f"{conf}_even", background=BG_TABLE_ROW,     foreground=color)
             self._tree.tag_configure(f"{conf}_odd",  background=BG_TABLE_ROW_ALT, foreground=color)
-
         self._tree.tag_configure("none_even", background=BG_TABLE_ROW,     foreground=TEXT_MUTED)
         self._tree.tag_configure("none_odd",  background=BG_TABLE_ROW_ALT, foreground=TEXT_MUTED)
 
         self._tree.bind("<<TreeviewSelect>>", self._on_select)
 
         self._empty_label = ctk.CTkLabel(
-            container,
-            text="",
-            font=ctk.CTkFont(size=13),
-            text_color=TEXT_MUTED,
+            container, text="",
+            font=ctk.CTkFont(size=13), text_color=TEXT_MUTED,
         )
         self._empty_label.grid(row=1, column=0)
 
-    # ── Status bar ────────────────────────────────────────────────────────────
-
     def _build_statusbar(self) -> None:
         bar = ctk.CTkFrame(self, fg_color="transparent", height=32)
-        bar.grid(row=_ROW_STATUS, column=0, sticky="ew", padx=28, pady=(8, 20))
+        bar.grid(row=_ROW_STATUS, column=0, sticky="ew", padx=30, pady=(8, 22))
         bar.grid_columnconfigure(0, weight=1)
 
         self._status_label = ctk.CTkLabel(
-            bar,
-            text="",
-            font=ctk.CTkFont(size=11),
-            text_color=TEXT_MUTED,
-            anchor="w",
+            bar, text="",
+            font=ctk.CTkFont(size=11), text_color=TEXT_MUTED, anchor="w",
         )
         self._status_label.grid(row=0, column=0, sticky="w")
 
         self._reveal_btn = ctk.CTkButton(
             bar,
             text="⌘  Reveal in Finder",
-            width=160,
+            width=155,
             height=34,
-            corner_radius=8,
-            font=ctk.CTkFont(size=13),
+            corner_radius=9,
+            font=ctk.CTkFont(size=12),
             fg_color=BG_CARD,
-            hover_color="#1C1F2E",
+            hover_color=BORDER_BRIGHT,
             text_color=TEXT_MUTED,
             border_width=1,
             border_color=BORDER,
@@ -434,11 +401,8 @@ class CleanupRecommendationsView(ctk.CTkFrame):
     # ── Public API ────────────────────────────────────────────────────────────
 
     def refresh(self, plugins: list[Plugin]) -> None:
-        """Store *plugins* and re-run cleanup analysis with the active profile."""
         self._plugins = plugins
         self._reanalyze()
-
-    # ── Profile selection ─────────────────────────────────────────────────────
 
     def _set_profile(self, key: str) -> None:
         if key == self._active_profile_key:
@@ -453,8 +417,8 @@ class CleanupRecommendationsView(ctk.CTkFrame):
         for key, btn in self._profile_btns.items():
             active = key == self._active_profile_key
             btn.configure(
-                fg_color=ACCENT if active else "#1C1F2E",
-                hover_color=ACCENT_HOVER if active else "#252840",
+                fg_color=ACCENT if active else BG_CARD_INNER,
+                hover_color=ACCENT_HOVER if active else BORDER_BRIGHT,
                 text_color=TEXT_PRIMARY if active else TEXT_MUTED,
             )
 
@@ -473,34 +437,29 @@ class CleanupRecommendationsView(ctk.CTkFrame):
     def _toggle_custom_checkboxes(self) -> None:
         if self._active_profile_key == PROFILE_CUSTOM:
             self._custom_fmt_frame.grid(
-                row=1, column=0, columnspan=2, sticky="w", padx=16, pady=(4, 10)
+                row=1, column=0, columnspan=2, sticky="w", padx=18, pady=(4, 12),
             )
             self._profile_desc_label.grid_remove()
         else:
             self._custom_fmt_frame.grid_remove()
             self._profile_desc_label.grid(
-                row=1, column=0, columnspan=2, sticky="w", padx=16, pady=(4, 10)
+                row=1, column=0, columnspan=2, sticky="w", padx=18, pady=(4, 12),
             )
 
     def _on_custom_format_change(self) -> None:
-        """Called when any Custom format checkbox is toggled."""
         self._update_profile_description()
         if self._active_profile_key == PROFILE_CUSTOM:
             self._reanalyze()
 
-    # ── Analysis ──────────────────────────────────────────────────────────────
-
     def _active_profile(self) -> DawProfile:
         if self._active_profile_key == PROFILE_CUSTOM:
-            preferred = self._custom_preferred()
-            return make_custom_profile(preferred)
+            return make_custom_profile(self._custom_preferred())
         return get_profile(self._active_profile_key)
 
     def _custom_preferred(self) -> list[str]:
         return [f for f in _CUSTOM_FMT_ORDER if self._custom_vars[f].get()]
 
     def _reanalyze(self) -> None:
-        """Re-run analysis against the current plugins and active profile."""
         if not self._plugins:
             self._recs = []
             self._show_empty_state(initial=False)
@@ -508,8 +467,6 @@ class CleanupRecommendationsView(ctk.CTkFrame):
             return
 
         profile = self._active_profile()
-
-        # Guard: Custom profile with no formats selected
         if self._active_profile_key == PROFILE_CUSTOM and not profile.preferred:
             self._recs = []
             self._empty_label.configure(
@@ -525,8 +482,6 @@ class CleanupRecommendationsView(ctk.CTkFrame):
         self._update_stat_cards()
         self._populate()
 
-    # ── Filter ────────────────────────────────────────────────────────────────
-
     def _set_filter(self, key: str) -> None:
         if key == self._active_filter:
             return
@@ -539,7 +494,7 @@ class CleanupRecommendationsView(ctk.CTkFrame):
             active = key == self._active_filter
             btn.configure(
                 fg_color=ACCENT if active else BG_CARD,
-                hover_color=ACCENT_HOVER if active else "#1C1F2E",
+                hover_color=ACCENT_HOVER if active else BORDER_BRIGHT,
                 text_color=TEXT_PRIMARY if active else TEXT_MUTED,
             )
 
@@ -552,9 +507,7 @@ class CleanupRecommendationsView(ctk.CTkFrame):
             return [r for r in self._recs if r.is_high_disk_usage]
         if self._active_filter == FILTER_MULTI:
             return [r for r in self._recs if r.is_multi_format]
-        return self._recs  # FILTER_ALL
-
-    # ── Rendering ─────────────────────────────────────────────────────────────
+        return self._recs
 
     def _show_empty_state(self, *, initial: bool) -> None:
         msg = (
@@ -574,13 +527,10 @@ class CleanupRecommendationsView(ctk.CTkFrame):
         if not self._recs:
             self._reset_stats()
             return
-
-        profile_name = self._active_profile().name
         total_analyzed = len(self._recs)
         total_flagged  = sum(len(r.redundant_formats) for r in self._recs)
         total_safe     = sum(1 for r in self._recs if r.confidence == CONF_SAFE and r.has_redundant)
         total_space    = sum(r.recoverable_size for r in self._recs)
-
         self._stat_analyzed.configure(text=str(total_analyzed))
         self._stat_flagged.configure(text=str(total_flagged))
         self._stat_safe.configure(text=str(total_safe))
@@ -611,10 +561,9 @@ class CleanupRecommendationsView(ctk.CTkFrame):
             installed_str = "  ·  ".join(
                 f for f in ("VST3", "AU", "VST", "AAX") if f in rec.installed_formats
             )
-            keep_str     = "  ·  ".join(rec.keep_formats) if rec.keep_formats else "—"
+            keep_str      = "  ·  ".join(rec.keep_formats) if rec.keep_formats else "—"
             redundant_str = "  ·  ".join(rec.redundant_formats) if rec.redundant_formats else "—"
-            space_str    = rec.recoverable_size_human if rec.has_redundant else "—"
-            conf_str     = rec.confidence
+            space_str     = rec.recoverable_size_human if rec.has_redundant else "—"
 
             tag_key = rec.confidence if rec.has_redundant else "none"
             idx     = conf_row.get(tag_key, 0)
@@ -624,15 +573,8 @@ class CleanupRecommendationsView(ctk.CTkFrame):
 
             iid = self._tree.insert(
                 "", "end",
-                values=(
-                    rec.product_name,
-                    rec.developer or "—",
-                    installed_str,
-                    keep_str,
-                    redundant_str,
-                    space_str,
-                    conf_str,
-                ),
+                values=(rec.product_name, rec.developer or "—", installed_str,
+                        keep_str, redundant_str, space_str, rec.confidence),
                 tags=(tag,),
             )
             self._iid_to_rec[iid] = rec
@@ -643,7 +585,6 @@ class CleanupRecommendationsView(ctk.CTkFrame):
         if not self._recs:
             self._status_label.configure(text="")
             return
-
         flagged      = [r for r in self._recs if r.has_redundant]
         safe_count   = sum(1 for r in flagged if r.confidence == CONF_SAFE)
         review_count = sum(1 for r in flagged if r.confidence == CONF_REVIEW)
@@ -660,8 +601,6 @@ class CleanupRecommendationsView(ctk.CTkFrame):
                 text=f"Showing {visible} result(s) — {label}  [{profile_name}]"
             )
 
-    # ── Selection / Finder ────────────────────────────────────────────────────
-
     def _on_select(self, _event=None) -> None:
         has_sel = bool(self._tree.selection())
         self._reveal_btn.configure(
@@ -676,7 +615,6 @@ class CleanupRecommendationsView(ctk.CTkFrame):
         rec = self._iid_to_rec.get(selected[0])
         if not rec:
             return
-        # Prefer the first redundant format path (the one being suggested for removal)
         target_fmt = rec.redundant_formats[0] if rec.redundant_formats else None
         if not target_fmt:
             target_fmt = next(iter(rec.installed_formats), None)

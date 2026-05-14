@@ -20,21 +20,27 @@ from app.core.health import (
     CAT_DUPLICATE,
 )
 
-# ── Palette ───────────────────────────────────────────────────────────────────
-BG_CARD          = "#13161F"
-BG_TABLE         = "#0D0F18"
-BG_TABLE_ROW     = "#13161F"
-BG_TABLE_ROW_ALT = "#161924"
-BG_TABLE_SEL     = "#1E2A4A"
+# ── Design System ─────────────────────────────────────────────────────────────
+BG_CARD          = "#131720"
+BG_TABLE         = "#0D1020"
+BG_TABLE_ROW     = "#131720"
+BG_TABLE_ROW_ALT = "#161B28"
+BG_TABLE_SEL     = "#1B2848"
 ACCENT           = "#6C8EF5"
 ACCENT_HOVER     = "#8BAAF7"
-ACCENT_GREEN     = "#7ED321"
-ACCENT_WARN      = "#F5A623"
-ACCENT_DANGER    = "#F56C6C"
-ACCENT_DUPE      = "#9B59F5"
-TEXT_PRIMARY     = "#E8EAF0"
-TEXT_MUTED       = "#6B7280"
-BORDER           = "#1C1F2E"
+ACCENT_GREEN     = "#4ADE80"
+ACCENT_WARN      = "#F59E0B"
+ACCENT_DANGER    = "#F87171"
+ACCENT_DUPE      = "#A855F7"
+GREEN_DIM        = "#183A28"
+ORANGE_DIM       = "#2A1E08"
+RED_DIM          = "#2A1018"
+PURPLE_DIM       = "#21133A"
+TEXT_PRIMARY     = "#EEF0F8"
+TEXT_SECONDARY   = "#94A3B8"
+TEXT_MUTED       = "#4B5870"
+BORDER           = "#1C2038"
+BORDER_BRIGHT    = "#242B48"
 
 _CAT_FG: dict[str, str] = {
     CAT_BROKEN:    ACCENT_DANGER,
@@ -45,7 +51,7 @@ _CAT_FG: dict[str, str] = {
 FILTER_ALL = "all"
 
 _FILTERS: list[tuple[str, str]] = [
-    (FILTER_ALL,    "All"),
+    (FILTER_ALL,    "All Issues"),
     (CAT_WARNING,   "Warnings"),
     (CAT_DUPLICATE, "Duplicates"),
     (CAT_BROKEN,    "Broken"),
@@ -53,7 +59,7 @@ _FILTERS: list[tuple[str, str]] = [
 
 
 class PluginHealthView(ctk.CTkFrame):
-    """Plugin Health module — detects and surfaces issues in the scanned plug-in list."""
+    """Plugin Health module — surfaces issues in the scanned plug-in list."""
 
     def __init__(self, parent: ctk.CTkFrame, **kwargs):
         super().__init__(parent, fg_color="transparent", **kwargs)
@@ -64,8 +70,6 @@ class PluginHealthView(ctk.CTkFrame):
         self._filter_btns: dict[str, ctk.CTkButton] = {}
 
         self._build()
-
-    # ── Layout ────────────────────────────────────────────────────────────────
 
     def _build(self) -> None:
         self.grid_columnconfigure(0, weight=1)
@@ -80,12 +84,12 @@ class PluginHealthView(ctk.CTkFrame):
 
     def _build_header(self) -> None:
         header = ctk.CTkFrame(self, fg_color="transparent")
-        header.grid(row=0, column=0, sticky="ew", padx=28, pady=(28, 0))
+        header.grid(row=0, column=0, sticky="ew", padx=30, pady=(28, 0))
 
         ctk.CTkLabel(
             header,
             text="Plugin Health",
-            font=ctk.CTkFont(size=22, weight="bold"),
+            font=ctk.CTkFont(family="SF Pro Display", size=22, weight="bold"),
             text_color=TEXT_PRIMARY,
         ).grid(row=0, column=0, sticky="w")
 
@@ -94,18 +98,24 @@ class PluginHealthView(ctk.CTkFrame):
             text="Analyze scanned plug-ins and detect potential issues",
             font=ctk.CTkFont(size=12),
             text_color=TEXT_MUTED,
-        ).grid(row=1, column=0, sticky="w", pady=(2, 0))
+        ).grid(row=1, column=0, sticky="w", pady=(3, 0))
 
     def _build_stats_row(self) -> None:
         row = ctk.CTkFrame(self, fg_color="transparent")
-        row.grid(row=1, column=0, sticky="ew", padx=28, pady=(20, 0))
+        row.grid(row=1, column=0, sticky="ew", padx=30, pady=(20, 0))
         for i in range(4):
             row.grid_columnconfigure(i, weight=1, uniform="hstat")
 
-        self._stat_healthy    = self._make_stat_card(row, 0, "HEALTHY PLUGINS",  "—", ACCENT_GREEN)
-        self._stat_warnings   = self._make_stat_card(row, 1, "WARNINGS",          "—", ACCENT_WARN)
-        self._stat_duplicates = self._make_stat_card(row, 2, "DUPLICATES",        "—", ACCENT_DUPE)
-        self._stat_broken     = self._make_stat_card(row, 3, "POSSIBLE BROKEN",   "—", ACCENT_DANGER)
+        defs = [
+            (0, "HEALTHY PLUGINS",  "—", ACCENT_GREEN, GREEN_DIM),
+            (1, "WARNINGS",         "—", ACCENT_WARN,  ORANGE_DIM),
+            (2, "DUPLICATES",       "—", ACCENT_DUPE,  PURPLE_DIM),
+            (3, "POSSIBLE BROKEN",  "—", ACCENT_DANGER, RED_DIM),
+        ]
+        self._stat_healthy    = self._make_stat_card(row, *defs[0])
+        self._stat_warnings   = self._make_stat_card(row, *defs[1])
+        self._stat_duplicates = self._make_stat_card(row, *defs[2])
+        self._stat_broken     = self._make_stat_card(row, *defs[3])
 
     def _make_stat_card(
         self,
@@ -114,45 +124,49 @@ class PluginHealthView(ctk.CTkFrame):
         label: str,
         initial: str,
         color: str,
+        dim_color: str,
     ) -> ctk.CTkLabel:
-        pad = (0, 12) if col < 3 else (0, 0)
-        card = ctk.CTkFrame(parent, fg_color=BG_CARD, corner_radius=10)
+        pad = (0, 10) if col < 3 else (0, 0)
+        card = ctk.CTkFrame(
+            parent, fg_color=BG_CARD, corner_radius=12,
+            border_width=1, border_color=BORDER,
+        )
         card.grid(row=0, column=col, sticky="ew", padx=pad)
-        card.grid_columnconfigure(0, weight=1)
+        card.grid_columnconfigure(1, weight=1)
+
+        icon_box = ctk.CTkFrame(card, width=38, height=38, corner_radius=9, fg_color=dim_color)
+        icon_box.grid(row=0, column=0, rowspan=2, padx=(14, 0), pady=14)
+        icon_box.grid_propagate(False)
 
         ctk.CTkLabel(
-            card,
-            text=label,
-            font=ctk.CTkFont(size=10, weight="bold"),
-            text_color=TEXT_MUTED,
-            anchor="w",
-        ).grid(row=0, column=0, sticky="w", padx=16, pady=(14, 2))
+            card, text=label,
+            font=ctk.CTkFont(size=9, weight="bold"),
+            text_color=TEXT_MUTED, anchor="w",
+        ).grid(row=0, column=1, sticky="sw", padx=(12, 14), pady=(14, 0))
 
         lbl = ctk.CTkLabel(
-            card,
-            text=initial,
+            card, text=initial,
             font=ctk.CTkFont(size=28, weight="bold"),
-            text_color=color,
-            anchor="w",
+            text_color=color, anchor="w",
         )
-        lbl.grid(row=1, column=0, sticky="w", padx=16, pady=(0, 14))
+        lbl.grid(row=1, column=1, sticky="nw", padx=(12, 14), pady=(0, 14))
         return lbl
 
     def _build_filter_bar(self) -> None:
         bar = ctk.CTkFrame(self, fg_color="transparent")
-        bar.grid(row=2, column=0, sticky="ew", padx=28, pady=(14, 0))
+        bar.grid(row=2, column=0, sticky="ew", padx=30, pady=(14, 0))
 
         for key, label in _FILTERS:
             is_active = key == FILTER_ALL
             btn = ctk.CTkButton(
                 bar,
                 text=label,
-                width=110,
+                width=120,
                 height=34,
-                corner_radius=8,
+                corner_radius=9,
                 font=ctk.CTkFont(size=12),
                 fg_color=ACCENT if is_active else BG_CARD,
-                hover_color=ACCENT_HOVER if is_active else "#1C1F2E",
+                hover_color=ACCENT_HOVER if is_active else BORDER_BRIGHT,
                 text_color=TEXT_PRIMARY if is_active else TEXT_MUTED,
                 border_width=1,
                 border_color=BORDER,
@@ -162,13 +176,16 @@ class PluginHealthView(ctk.CTkFrame):
             self._filter_btns[key] = btn
 
     def _build_table(self) -> None:
-        container = ctk.CTkFrame(self, fg_color=BG_CARD, corner_radius=12)
-        container.grid(row=3, column=0, sticky="nsew", padx=28, pady=(14, 0))
+        container = ctk.CTkFrame(
+            self, fg_color=BG_CARD, corner_radius=14,
+            border_width=1, border_color=BORDER,
+        )
+        container.grid(row=3, column=0, sticky="nsew", padx=30, pady=(14, 0))
         container.grid_rowconfigure(1, weight=1)
         container.grid_columnconfigure(0, weight=1)
 
         ctk.CTkFrame(container, height=1, fg_color=BORDER).grid(
-            row=0, column=0, sticky="ew", padx=16, pady=(12, 0)
+            row=0, column=0, sticky="ew", padx=16, pady=(12, 0),
         )
 
         tree_frame = tk.Frame(container, bg=BG_TABLE)
@@ -182,7 +199,7 @@ class PluginHealthView(ctk.CTkFrame):
             background=BG_TABLE,
             foreground=TEXT_PRIMARY,
             fieldbackground=BG_TABLE,
-            rowheight=34,
+            rowheight=36,
             borderwidth=0,
             font=("SF Pro Text", 12),
         )
@@ -203,18 +220,15 @@ class PluginHealthView(ctk.CTkFrame):
 
         columns = ("name", "issue_type", "fmt", "path", "action")
         self._tree = ttk.Treeview(
-            tree_frame,
-            columns=columns,
-            show="headings",
-            style="Health.Treeview",
-            selectmode="browse",
+            tree_frame, columns=columns,
+            show="headings", style="Health.Treeview", selectmode="browse",
         )
         col_cfg = [
-            ("name",       "PLUGIN NAME",      180, True,  "w"),
-            ("issue_type", "ISSUE TYPE",        190, False, "w"),
-            ("fmt",        "FORMAT",             70, False, "center"),
-            ("path",       "FILE PATH",         290, True,  "w"),
-            ("action",     "SUGGESTED ACTION",  250, True,  "w"),
+            ("name",       "PLUGIN NAME",     180, True,  "w"),
+            ("issue_type", "ISSUE TYPE",       190, False, "w"),
+            ("fmt",        "FORMAT",            70, False, "center"),
+            ("path",       "FILE PATH",        290, True,  "w"),
+            ("action",     "SUGGESTED ACTION", 250, True,  "w"),
         ]
         for col_id, heading, width, stretch, anchor in col_cfg:
             self._tree.heading(col_id, text=heading)
@@ -228,7 +242,6 @@ class PluginHealthView(ctk.CTkFrame):
         vsb.grid(row=0, column=1, sticky="ns")
         hsb.grid(row=1, column=0, sticky="ew")
 
-        # Row colour tags — one even/odd pair per category
         for cat, fg in _CAT_FG.items():
             self._tree.tag_configure(f"{cat}_even", background=BG_TABLE_ROW,     foreground=fg)
             self._tree.tag_configure(f"{cat}_odd",  background=BG_TABLE_ROW_ALT, foreground=fg)
@@ -236,36 +249,31 @@ class PluginHealthView(ctk.CTkFrame):
         self._tree.bind("<<TreeviewSelect>>", self._on_select)
 
         self._empty_label = ctk.CTkLabel(
-            container,
-            text="",
-            font=ctk.CTkFont(size=13),
-            text_color=TEXT_MUTED,
+            container, text="",
+            font=ctk.CTkFont(size=13), text_color=TEXT_MUTED,
         )
         self._empty_label.grid(row=1, column=0)
 
     def _build_statusbar(self) -> None:
         bar = ctk.CTkFrame(self, fg_color="transparent", height=32)
-        bar.grid(row=4, column=0, sticky="ew", padx=28, pady=(8, 20))
+        bar.grid(row=4, column=0, sticky="ew", padx=30, pady=(8, 22))
         bar.grid_columnconfigure(0, weight=1)
 
         self._status_label = ctk.CTkLabel(
-            bar,
-            text="",
-            font=ctk.CTkFont(size=11),
-            text_color=TEXT_MUTED,
-            anchor="w",
+            bar, text="",
+            font=ctk.CTkFont(size=11), text_color=TEXT_MUTED, anchor="w",
         )
         self._status_label.grid(row=0, column=0, sticky="w")
 
         self._reveal_btn = ctk.CTkButton(
             bar,
             text="⌘  Reveal in Finder",
-            width=160,
+            width=155,
             height=34,
-            corner_radius=8,
-            font=ctk.CTkFont(size=13),
+            corner_radius=9,
+            font=ctk.CTkFont(size=12),
             fg_color=BG_CARD,
-            hover_color="#1C1F2E",
+            hover_color=BORDER_BRIGHT,
             text_color=TEXT_MUTED,
             border_width=1,
             border_color=BORDER,
@@ -277,14 +285,11 @@ class PluginHealthView(ctk.CTkFrame):
     # ── Public API ────────────────────────────────────────────────────────────
 
     def refresh(self, plugins: list[Plugin]) -> None:
-        """Re-analyze *plugins* and repopulate the view."""
         self._report = analyze_health(plugins)
         self._active_filter = FILTER_ALL
         self._update_filter_buttons()
         self._update_stat_cards()
         self._populate()
-
-    # ── Filtering ─────────────────────────────────────────────────────────────
 
     def _set_filter(self, key: str) -> None:
         if key == self._active_filter:
@@ -298,11 +303,9 @@ class PluginHealthView(ctk.CTkFrame):
             active = key == self._active_filter
             btn.configure(
                 fg_color=ACCENT if active else BG_CARD,
-                hover_color=ACCENT_HOVER if active else "#1C1F2E",
+                hover_color=ACCENT_HOVER if active else BORDER_BRIGHT,
                 text_color=TEXT_PRIMARY if active else TEXT_MUTED,
             )
-
-    # ── Rendering ─────────────────────────────────────────────────────────────
 
     def _show_empty_state(self, *, initial: bool) -> None:
         msg = (
@@ -315,20 +318,15 @@ class PluginHealthView(ctk.CTkFrame):
 
     def _update_stat_cards(self) -> None:
         if self._report is None:
-            for lbl in (
-                self._stat_healthy,
-                self._stat_warnings,
-                self._stat_duplicates,
-                self._stat_broken,
-            ):
+            for lbl in (self._stat_healthy, self._stat_warnings,
+                        self._stat_duplicates, self._stat_broken):
                 lbl.configure(text="—")
             return
-
         r = self._report
-        self._stat_healthy.configure(text=str(r.healthy_count))
-        self._stat_warnings.configure(text=str(len(r.warnings)))
-        self._stat_duplicates.configure(text=str(len(r.duplicates)))
-        self._stat_broken.configure(text=str(len(r.broken)))
+        self._stat_healthy.configure(text=f"{r.healthy_count:,}")
+        self._stat_warnings.configure(text=f"{len(r.warnings):,}")
+        self._stat_duplicates.configure(text=f"{len(r.duplicates):,}")
+        self._stat_broken.configure(text=f"{len(r.broken):,}")
 
     def _populate(self) -> None:
         for iid in self._tree.get_children():
@@ -362,7 +360,6 @@ class PluginHealthView(ctk.CTkFrame):
 
         self._empty_label.grid_remove()
 
-        # Per-category row counters for alternating colours
         cat_row: dict[str, int] = {CAT_BROKEN: 0, CAT_WARNING: 0, CAT_DUPLICATE: 0}
 
         for issue in issues:
@@ -373,13 +370,8 @@ class PluginHealthView(ctk.CTkFrame):
 
             iid = self._tree.insert(
                 "", "end",
-                values=(
-                    issue.plugin_name,
-                    issue.issue_type,
-                    issue.fmt,
-                    issue.path,
-                    issue.suggested_action,
-                ),
+                values=(issue.plugin_name, issue.issue_type, issue.fmt,
+                        issue.path, issue.suggested_action),
                 tags=(tag,),
             )
             self._iid_to_issue[iid] = issue
@@ -397,19 +389,17 @@ class PluginHealthView(ctk.CTkFrame):
         if self._active_filter == FILTER_ALL:
             if total == 0:
                 self._status_label.configure(
-                    text=f"No issues detected across {plugins} scanned plug-in(s)"
+                    text=f"No issues detected across {plugins:,} scanned plug-in(s)"
                 )
             else:
                 self._status_label.configure(
-                    text=f"{total} issue(s) across {plugins} scanned plug-in(s) "
-                         f"— {self._report.healthy_count} healthy"
+                    text=f"{total:,} issue(s) across {plugins:,} plug-in(s)  ·  "
+                         f"{self._report.healthy_count:,} healthy"
                 )
         else:
             self._status_label.configure(
-                text=f"Showing {visible} {self._active_filter} issue(s)"
+                text=f"Showing {visible:,} {self._active_filter} issue(s)"
             )
-
-    # ── Selection / Finder ────────────────────────────────────────────────────
 
     def _on_select(self, _event=None) -> None:
         has_sel = bool(self._tree.selection())

@@ -17,23 +17,28 @@ from app.core.scanner import Plugin, ScanResult, scan_plugins
 from app.core.exporter import export_csv
 from app.utils.helpers import humanize_count
 
-# ── Palette ───────────────────────────────────────────────────────────────────
-BG_CARD = "#13161F"
-BG_TABLE = "#0D0F18"
-BG_TABLE_ROW = "#13161F"
-BG_TABLE_ROW_ALT = "#161924"
-BG_TABLE_SEL = "#1E2A4A"
-ACCENT = "#6C8EF5"
-ACCENT_HOVER = "#8BAAF7"
-ACCENT_DANGER = "#F56C6C"
-TEXT_PRIMARY = "#E8EAF0"
-TEXT_MUTED = "#6B7280"
-BORDER = "#1C1F2E"
+# ── Design System ─────────────────────────────────────────────────────────────
+BG_CARD          = "#131720"
+BG_TABLE         = "#0D1020"
+BG_TABLE_ROW     = "#131720"
+BG_TABLE_ROW_ALT = "#161B28"
+BG_TABLE_SEL     = "#1B2848"
+BG_SEARCH        = "#161B28"
+ACCENT           = "#6C8EF5"
+ACCENT_HOVER     = "#8BAAF7"
+ACCENT_DIM       = "#1A2545"
+ACCENT_DANGER    = "#F87171"
+TEXT_PRIMARY     = "#EEF0F8"
+TEXT_SECONDARY   = "#94A3B8"
+TEXT_MUTED       = "#4B5870"
+BORDER           = "#1C2038"
+BORDER_BRIGHT    = "#242B48"
+
 FMT_COLORS: dict[str, str] = {
-    "VST":  "#F5A623",
-    "VST3": "#7ED321",
-    "AU":   "#4A90E2",
-    "AAX":  "#BD10E0",
+    "VST":  "#F59E0B",
+    "VST3": "#4ADE80",
+    "AU":   "#60A5FA",
+    "AAX":  "#A855F7",
 }
 
 
@@ -44,6 +49,8 @@ class PluginScannerView(ctk.CTkFrame):
         self,
         parent: ctk.CTkFrame,
         on_plugins_ready: Optional[Callable[[list[Plugin]], None]] = None,
+        db=None,
+        last_scanned: Optional[str] = None,
         **kwargs,
     ):
         super().__init__(parent, fg_color="transparent", **kwargs)
@@ -69,35 +76,46 @@ class PluginScannerView(ctk.CTkFrame):
 
     def _build_header(self) -> None:
         header = ctk.CTkFrame(self, fg_color="transparent")
-        header.grid(row=0, column=0, sticky="ew", padx=28, pady=(28, 0))
+        header.grid(row=0, column=0, sticky="ew", padx=30, pady=(28, 0))
         header.grid_columnconfigure(1, weight=1)
 
         ctk.CTkLabel(
             header,
             text="Plug-in Scanner",
-            font=ctk.CTkFont(size=22, weight="bold"),
+            font=ctk.CTkFont(family="SF Pro Display", size=22, weight="bold"),
             text_color=TEXT_PRIMARY,
         ).grid(row=0, column=0, sticky="w")
 
         ctk.CTkLabel(
             header,
-            text="Detect VST / VST3 / AU / AAX plug-ins installed on this Mac",
+            text="Detect VST  ·  VST3  ·  AU  ·  AAX plug-ins installed on this Mac",
             font=ctk.CTkFont(size=12),
             text_color=TEXT_MUTED,
-        ).grid(row=1, column=0, sticky="w", pady=(2, 0))
+        ).grid(row=1, column=0, sticky="w", pady=(3, 0))
+
+        # Format badges
+        badge_row = ctk.CTkFrame(header, fg_color="transparent")
+        badge_row.grid(row=0, column=1, rowspan=2, sticky="e")
+        for fmt, color in FMT_COLORS.items():
+            badge = ctk.CTkFrame(badge_row, fg_color=BORDER_BRIGHT, corner_radius=6)
+            badge.pack(side="right", padx=(4, 0))
+            ctk.CTkLabel(
+                badge, text=fmt,
+                font=ctk.CTkFont(size=10, weight="bold"),
+                text_color=color,
+            ).pack(padx=10, pady=4)
 
     def _build_toolbar(self) -> None:
         bar = ctk.CTkFrame(self, fg_color="transparent")
-        bar.grid(row=1, column=0, sticky="ew", padx=28, pady=(20, 12))
+        bar.grid(row=1, column=0, sticky="ew", padx=30, pady=(18, 12))
         bar.grid_columnconfigure(1, weight=1)
 
-        # Scan button
         self._scan_btn = ctk.CTkButton(
             bar,
             text="  ◈  Scan Plugins",
-            width=160,
+            width=155,
             height=40,
-            corner_radius=8,
+            corner_radius=9,
             font=ctk.CTkFont(size=13, weight="bold"),
             fg_color=ACCENT,
             hover_color=ACCENT_HOVER,
@@ -106,11 +124,8 @@ class PluginScannerView(ctk.CTkFrame):
         )
         self._scan_btn.grid(row=0, column=0, sticky="w")
 
-        # Search box
-        self._search_var = tk.StringVar()
-        self._search_var.trace_add("write", self._on_search)
-
-        search_frame = ctk.CTkFrame(bar, fg_color=BG_CARD, corner_radius=8)
+        search_frame = ctk.CTkFrame(bar, fg_color=BG_SEARCH, corner_radius=9,
+                                    border_width=1, border_color=BORDER)
         search_frame.grid(row=0, column=1, sticky="ew", padx=(12, 0))
         search_frame.grid_columnconfigure(1, weight=1)
 
@@ -122,47 +137,47 @@ class PluginScannerView(ctk.CTkFrame):
             width=30,
         ).grid(row=0, column=0, padx=(10, 0))
 
+        self._search_var = tk.StringVar()
+        self._search_var.trace_add("write", self._on_search)
         self._search_entry = ctk.CTkEntry(
             search_frame,
             textvariable=self._search_var,
-            placeholder_text="Search by name, format, or path…",
+            placeholder_text="Search by name, format, developer, or path…",
             fg_color="transparent",
             border_width=0,
             text_color=TEXT_PRIMARY,
             placeholder_text_color=TEXT_MUTED,
-            font=ctk.CTkFont(size=13),
+            font=ctk.CTkFont(size=12),
             height=40,
         )
         self._search_entry.grid(row=0, column=1, sticky="ew", padx=(4, 10))
 
-        # Export button
         self._export_btn = ctk.CTkButton(
             bar,
             text="↓  Export CSV",
             width=130,
             height=40,
-            corner_radius=8,
-            font=ctk.CTkFont(size=13),
+            corner_radius=9,
+            font=ctk.CTkFont(size=12),
             fg_color=BG_CARD,
-            hover_color="#1C1F2E",
+            hover_color=BORDER_BRIGHT,
             text_color=TEXT_MUTED,
             border_width=1,
             border_color=BORDER,
             command=self._export_csv,
             state="disabled",
         )
-        self._export_btn.grid(row=0, column=2, sticky="e", padx=(12, 0))
+        self._export_btn.grid(row=0, column=2, sticky="e", padx=(10, 0))
 
-        # Reveal in Finder button
         self._reveal_btn = ctk.CTkButton(
             bar,
             text="⌘  Reveal in Finder",
-            width=160,
+            width=155,
             height=40,
-            corner_radius=8,
-            font=ctk.CTkFont(size=13),
+            corner_radius=9,
+            font=ctk.CTkFont(size=12),
             fg_color=BG_CARD,
-            hover_color="#1C1F2E",
+            hover_color=BORDER_BRIGHT,
             text_color=TEXT_MUTED,
             border_width=1,
             border_color=BORDER,
@@ -172,17 +187,18 @@ class PluginScannerView(ctk.CTkFrame):
         self._reveal_btn.grid(row=0, column=3, sticky="e", padx=(8, 0))
 
     def _build_table(self) -> None:
-        container = ctk.CTkFrame(self, fg_color=BG_CARD, corner_radius=12)
-        container.grid(row=2, column=0, sticky="nsew", padx=28, pady=(0, 0))
+        container = ctk.CTkFrame(
+            self, fg_color=BG_CARD, corner_radius=14,
+            border_width=1, border_color=BORDER,
+        )
+        container.grid(row=2, column=0, sticky="nsew", padx=30, pady=(0, 0))
         container.grid_rowconfigure(2, weight=1)
         container.grid_columnconfigure(0, weight=1)
 
-        # Divider below (invisible) header row
         ctk.CTkFrame(container, height=1, fg_color=BORDER).grid(
-            row=1, column=0, sticky="ew", padx=16, pady=(12, 0)
+            row=1, column=0, sticky="ew", padx=16, pady=(12, 0),
         )
 
-        # Treeview inside a plain tk Frame (needed for scrollbar pairing)
         tree_frame = tk.Frame(container, bg=BG_TABLE)
         tree_frame.grid(row=2, column=0, sticky="nsew", padx=0, pady=0)
         tree_frame.grid_rowconfigure(0, weight=1)
@@ -195,7 +211,7 @@ class PluginScannerView(ctk.CTkFrame):
             background=BG_TABLE,
             foreground=TEXT_PRIMARY,
             fieldbackground=BG_TABLE,
-            rowheight=34,
+            rowheight=36,
             borderwidth=0,
             font=("SF Pro Text", 12),
         )
@@ -214,7 +230,6 @@ class PluginScannerView(ctk.CTkFrame):
         )
         style.layout("Vault.Treeview", [("Vault.Treeview.treearea", {"sticky": "nswe"})])
 
-        # Columns: name · developer · version · fmt · size · modified · path
         self._tree = ttk.Treeview(
             tree_frame,
             columns=("name", "developer", "version", "fmt", "size", "modified", "path"),
@@ -243,15 +258,13 @@ class PluginScannerView(ctk.CTkFrame):
         vsb.grid(row=0, column=1, sticky="ns")
         hsb.grid(row=1, column=0, sticky="ew")
 
-        # Alternate row colours + format colour tags
         self._tree.tag_configure("even", background=BG_TABLE_ROW)
-        self._tree.tag_configure("odd", background=BG_TABLE_ROW_ALT)
+        self._tree.tag_configure("odd",  background=BG_TABLE_ROW_ALT)
         for fmt, color in FMT_COLORS.items():
             self._tree.tag_configure(f"fmt_{fmt}", foreground=color)
 
         self._tree.bind("<<TreeviewSelect>>", self._on_tree_select)
 
-        # Empty-state overlay
         self._empty_label = ctk.CTkLabel(
             container,
             text="Press  ◈ Scan Plugins  to discover audio plug-ins on this Mac",
@@ -262,7 +275,7 @@ class PluginScannerView(ctk.CTkFrame):
 
     def _build_statusbar(self) -> None:
         bar = ctk.CTkFrame(self, fg_color="transparent", height=32)
-        bar.grid(row=3, column=0, sticky="ew", padx=28, pady=(8, 20))
+        bar.grid(row=3, column=0, sticky="ew", padx=30, pady=(8, 22))
         bar.grid_columnconfigure(0, weight=1)
 
         self._status_var = tk.StringVar(value="Ready")
@@ -380,7 +393,6 @@ class PluginScannerView(ctk.CTkFrame):
         selected = self._tree.selection()
         if not selected:
             return
-        # PATH is column index 6 in the values tuple
         path = self._tree.item(selected[0], "values")[6]
         if path:
             subprocess.run(["open", "-R", path], check=False)

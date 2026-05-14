@@ -8,6 +8,7 @@ import subprocess
 import threading
 import tkinter as tk
 from tkinter import ttk
+from typing import Callable
 
 import customtkinter as ctk
 
@@ -23,50 +24,68 @@ from app.core.music_software_scanner import (
     scan_music_apps,
 )
 
-# ── Palette ───────────────────────────────────────────────────────────────────
-BG_CARD          = "#13161F"
-BG_TABLE         = "#0D0F18"
-BG_TABLE_ROW     = "#13161F"
-BG_TABLE_ROW_ALT = "#161924"
-BG_TABLE_SEL     = "#1E2A4A"
+# ── Design System ─────────────────────────────────────────────────────────────
+BG_CARD          = "#131720"
+BG_CARD_INNER    = "#181D2C"
+BG_TABLE         = "#0D1020"
+BG_TABLE_ROW     = "#131720"
+BG_TABLE_ROW_ALT = "#161B28"
+BG_TABLE_SEL     = "#1B2848"
 ACCENT           = "#6C8EF5"
 ACCENT_HOVER     = "#8BAAF7"
-TEXT_PRIMARY     = "#E8EAF0"
-TEXT_MUTED       = "#6B7280"
-BORDER           = "#1C1F2E"
+TEXT_PRIMARY     = "#EEF0F8"
+TEXT_SECONDARY   = "#94A3B8"
+TEXT_MUTED       = "#4B5870"
+BORDER           = "#1C2038"
+BORDER_BRIGHT    = "#242B48"
 
 CAT_COLORS: dict[str, str] = {
-    CATEGORY_DAW:             "#7ED321",
-    CATEGORY_DJ:              "#F5A623",
-    CATEGORY_PLUGIN_MANAGER:  "#6C8EF5",
-    CATEGORY_LICENSE_MANAGER: "#BD10E0",
-    CATEGORY_SAMPLE_MANAGER:  "#4A90E2",
-    CATEGORY_AUDIO_UTILITY:   "#50E3C2",
-    CATEGORY_HARDWARE_UTILITY: "#E8A838",
+    CATEGORY_DAW:              "#4ADE80",
+    CATEGORY_DJ:               "#F59E0B",
+    CATEGORY_PLUGIN_MANAGER:   "#6C8EF5",
+    CATEGORY_LICENSE_MANAGER:  "#A855F7",
+    CATEGORY_SAMPLE_MANAGER:   "#60A5FA",
+    CATEGORY_AUDIO_UTILITY:    "#2DD4BF",
+    CATEGORY_HARDWARE_UTILITY: "#F59E0B",
 }
 
-# ── Summary card definitions ─────────────────────────────────────────────────
+CAT_DIM: dict[str, str] = {
+    CATEGORY_DAW:              "#183A28",
+    CATEGORY_DJ:               "#2A1E08",
+    CATEGORY_PLUGIN_MANAGER:   "#1A2545",
+    CATEGORY_LICENSE_MANAGER:  "#21133A",
+    CATEGORY_SAMPLE_MANAGER:   "#122038",
+    CATEGORY_AUDIO_UTILITY:    "#0E2A28",
+    CATEGORY_HARDWARE_UTILITY: "#2A1E08",
+}
+
 _CARDS = [
-    ("total",    "Total Music Apps",          ACCENT,    "◈"),
-    ("daws",     "DAWs",                      "#7ED321", "♩"),
-    ("managers", "License & Plugin Managers", "#BD10E0", "⬡"),
-    ("hardware", "Hardware Utilities",        "#E8A838", "⬢"),
+    ("total",    "Total Music Apps",          ACCENT,    "#1A2545", "◈"),
+    ("daws",     "DAWs",                      "#4ADE80", "#183A28", "♩"),
+    ("managers", "License & Plugin Managers", "#A855F7", "#21133A", "⬡"),
+    ("hardware", "Hardware Utilities",        "#F59E0B", "#2A1E08", "⬢"),
 ]
 
 
 class MusicSoftwareScannerView(ctk.CTkFrame):
     """Content frame for the Music Software Scanner module."""
 
-    def __init__(self, parent: ctk.CTkFrame, **kwargs):
+    def __init__(
+        self,
+        parent: ctk.CTkFrame,
+        on_apps_ready: Callable[[list[MusicApp]], None] | None = None,
+        db=None,
+        last_scanned: str | None = None,
+        **kwargs,
+    ):
         super().__init__(parent, fg_color="transparent", **kwargs)
 
         self._all_apps: list[MusicApp] = []
         self._filtered: list[MusicApp] = []
         self._scanning = False
+        self._on_apps_ready = on_apps_ready
 
         self._build()
-
-    # ── Layout ────────────────────────────────────────────────────────────────
 
     def _build(self) -> None:
         self.grid_columnconfigure(0, weight=1)
@@ -80,33 +99,33 @@ class MusicSoftwareScannerView(ctk.CTkFrame):
 
     def _build_header(self) -> None:
         header = ctk.CTkFrame(self, fg_color="transparent")
-        header.grid(row=0, column=0, sticky="ew", padx=28, pady=(28, 0))
+        header.grid(row=0, column=0, sticky="ew", padx=30, pady=(28, 0))
 
         ctk.CTkLabel(
             header,
             text="Music Software Scanner",
-            font=ctk.CTkFont(size=22, weight="bold"),
+            font=ctk.CTkFont(family="SF Pro Display", size=22, weight="bold"),
             text_color=TEXT_PRIMARY,
         ).pack(anchor="w")
 
         ctk.CTkLabel(
             header,
-            text="Detect DAWs, DJ software, plugin managers, and hardware utilities installed on this Mac",
+            text="Detect DAWs, DJ software, plugin managers, and hardware utilities on this Mac",
             font=ctk.CTkFont(size=12),
             text_color=TEXT_MUTED,
-        ).pack(anchor="w", pady=(2, 0))
+        ).pack(anchor="w", pady=(3, 0))
 
     def _build_toolbar(self) -> None:
         bar = ctk.CTkFrame(self, fg_color="transparent")
-        bar.grid(row=1, column=0, sticky="ew", padx=28, pady=(16, 8))
+        bar.grid(row=1, column=0, sticky="ew", padx=30, pady=(18, 10))
         bar.grid_columnconfigure(1, weight=1)
 
         self._scan_btn = ctk.CTkButton(
             bar,
             text="  ♬  Scan Apps",
-            width=160,
+            width=155,
             height=40,
-            corner_radius=8,
+            corner_radius=9,
             font=ctk.CTkFont(size=13, weight="bold"),
             fg_color=ACCENT,
             hover_color=ACCENT_HOVER,
@@ -115,11 +134,10 @@ class MusicSoftwareScannerView(ctk.CTkFrame):
         )
         self._scan_btn.grid(row=0, column=0, sticky="w")
 
-        # Search
-        self._search_var = tk.StringVar()
-        self._search_var.trace_add("write", self._on_search)
-
-        search_frame = ctk.CTkFrame(bar, fg_color=BG_CARD, corner_radius=8)
+        search_frame = ctk.CTkFrame(
+            bar, fg_color=BG_CARD, corner_radius=9,
+            border_width=1, border_color=BORDER,
+        )
         search_frame.grid(row=0, column=1, sticky="ew", padx=(12, 0))
         search_frame.grid_columnconfigure(1, weight=1)
 
@@ -131,6 +149,8 @@ class MusicSoftwareScannerView(ctk.CTkFrame):
             width=30,
         ).grid(row=0, column=0, padx=(10, 0))
 
+        self._search_var = tk.StringVar()
+        self._search_var.trace_add("write", self._on_search)
         self._search_entry = ctk.CTkEntry(
             search_frame,
             textvariable=self._search_var,
@@ -139,68 +159,77 @@ class MusicSoftwareScannerView(ctk.CTkFrame):
             border_width=0,
             text_color=TEXT_PRIMARY,
             placeholder_text_color=TEXT_MUTED,
-            font=ctk.CTkFont(size=13),
+            font=ctk.CTkFont(size=12),
             height=40,
         )
         self._search_entry.grid(row=0, column=1, sticky="ew", padx=(4, 10))
 
-        # Reveal in Finder
         self._reveal_btn = ctk.CTkButton(
             bar,
             text="⌘  Reveal in Finder",
-            width=160,
+            width=155,
             height=40,
-            corner_radius=8,
-            font=ctk.CTkFont(size=13),
+            corner_radius=9,
+            font=ctk.CTkFont(size=12),
             fg_color=BG_CARD,
-            hover_color="#1C1F2E",
+            hover_color=BORDER_BRIGHT,
             text_color=TEXT_MUTED,
             border_width=1,
             border_color=BORDER,
             command=self._reveal_in_finder,
             state="disabled",
         )
-        self._reveal_btn.grid(row=0, column=2, sticky="e", padx=(12, 0))
+        self._reveal_btn.grid(row=0, column=2, sticky="e", padx=(10, 0))
 
     def _build_summary_cards(self) -> None:
         cards_row = ctk.CTkFrame(self, fg_color="transparent")
-        cards_row.grid(row=2, column=0, sticky="ew", padx=28, pady=(4, 12))
+        cards_row.grid(row=2, column=0, sticky="ew", padx=30, pady=(4, 14))
         for i in range(len(_CARDS)):
             cards_row.grid_columnconfigure(i, weight=1)
 
         self._card_labels: dict[str, ctk.CTkLabel] = {}
-        for col, (key, title, color, icon) in enumerate(_CARDS):
-            padx = (0, 8) if col < len(_CARDS) - 1 else (0, 0)
-            card = ctk.CTkFrame(cards_row, fg_color=BG_CARD, corner_radius=10)
+        for col, (key, title, color, dim, icon) in enumerate(_CARDS):
+            padx = (0, 10) if col < len(_CARDS) - 1 else (0, 0)
+            card = ctk.CTkFrame(
+                cards_row, fg_color=BG_CARD, corner_radius=12,
+                border_width=1, border_color=BORDER,
+            )
             card.grid(row=0, column=col, sticky="ew", padx=padx)
-            card.grid_columnconfigure(0, weight=1)
+            card.grid_columnconfigure(1, weight=1)
+
+            icon_box = ctk.CTkFrame(card, width=38, height=38, corner_radius=9, fg_color=dim)
+            icon_box.grid(row=0, column=0, rowspan=2, padx=(14, 0), pady=14)
+            icon_box.grid_propagate(False)
+            ctk.CTkLabel(
+                icon_box, text=icon,
+                font=ctk.CTkFont(size=15), text_color=color,
+            ).place(relx=0.5, rely=0.5, anchor="center")
 
             ctk.CTkLabel(
-                card,
-                text=f"{icon}  {title}",
-                font=ctk.CTkFont(size=11),
-                text_color=TEXT_MUTED,
-                anchor="w",
-            ).grid(row=0, column=0, padx=16, pady=(12, 2), sticky="w")
+                card, text=title.upper(),
+                font=ctk.CTkFont(size=9, weight="bold"),
+                text_color=TEXT_MUTED, anchor="w",
+            ).grid(row=0, column=1, sticky="sw", padx=(12, 14), pady=(14, 0))
 
             count_lbl = ctk.CTkLabel(
-                card,
-                text="—",
+                card, text="—",
                 font=ctk.CTkFont(size=26, weight="bold"),
-                text_color=color,
-                anchor="w",
+                text_color=color, anchor="w",
             )
-            count_lbl.grid(row=1, column=0, padx=16, pady=(0, 12), sticky="w")
+            count_lbl.grid(row=1, column=1, sticky="nw", padx=(12, 14), pady=(0, 14))
             self._card_labels[key] = count_lbl
 
     def _build_table(self) -> None:
-        container = ctk.CTkFrame(self, fg_color=BG_CARD, corner_radius=12)
-        container.grid(row=3, column=0, sticky="nsew", padx=28)
+        container = ctk.CTkFrame(
+            self, fg_color=BG_CARD, corner_radius=14,
+            border_width=1, border_color=BORDER,
+        )
+        container.grid(row=3, column=0, sticky="nsew", padx=30)
         container.grid_rowconfigure(2, weight=1)
         container.grid_columnconfigure(0, weight=1)
 
         ctk.CTkFrame(container, height=1, fg_color=BORDER).grid(
-            row=1, column=0, sticky="ew", padx=16, pady=(12, 0)
+            row=1, column=0, sticky="ew", padx=16, pady=(12, 0),
         )
 
         tree_frame = tk.Frame(container, bg=BG_TABLE)
@@ -215,7 +244,7 @@ class MusicSoftwareScannerView(ctk.CTkFrame):
             background=BG_TABLE,
             foreground=TEXT_PRIMARY,
             fieldbackground=BG_TABLE,
-            rowheight=34,
+            rowheight=36,
             borderwidth=0,
             font=("SF Pro Text", 12),
         )
@@ -232,10 +261,7 @@ class MusicSoftwareScannerView(ctk.CTkFrame):
             background=[("selected", BG_TABLE_SEL)],
             foreground=[("selected", TEXT_PRIMARY)],
         )
-        style.layout(
-            "Music.Treeview",
-            [("Music.Treeview.treearea", {"sticky": "nswe"})],
-        )
+        style.layout("Music.Treeview", [("Music.Treeview.treearea", {"sticky": "nswe"})])
 
         self._tree = ttk.Treeview(
             tree_frame,
@@ -245,18 +271,16 @@ class MusicSoftwareScannerView(ctk.CTkFrame):
             selectmode="browse",
         )
         col_cfg = [
-            ("name",      "NAME",      200, True,  "w"),
-            ("category",  "CATEGORY",  140, False, "w"),
-            ("developer", "DEVELOPER", 160, True,  "w"),
-            ("version",   "VERSION",    80, False, "center"),
-            ("path",      "PATH",      340, True,  "w"),
-            ("modified",  "MODIFIED",   95, False, "center"),
+            ("name",      "NAME",       200, True,  "w"),
+            ("category",  "CATEGORY",   140, False, "w"),
+            ("developer", "DEVELOPER",  160, True,  "w"),
+            ("version",   "VERSION",     80, False, "center"),
+            ("path",      "PATH",       340, True,  "w"),
+            ("modified",  "MODIFIED",    95, False, "center"),
         ]
         for col_id, heading, width, stretch, anchor in col_cfg:
             self._tree.heading(col_id, text=heading)
-            self._tree.column(
-                col_id, width=width, minwidth=50, stretch=stretch, anchor=anchor
-            )
+            self._tree.column(col_id, width=width, minwidth=50, stretch=stretch, anchor=anchor)
 
         vsb = ttk.Scrollbar(tree_frame, orient="vertical",   command=self._tree.yview)
         hsb = ttk.Scrollbar(tree_frame, orient="horizontal", command=self._tree.xview)
@@ -283,7 +307,7 @@ class MusicSoftwareScannerView(ctk.CTkFrame):
 
     def _build_statusbar(self) -> None:
         bar = ctk.CTkFrame(self, fg_color="transparent", height=32)
-        bar.grid(row=4, column=0, sticky="ew", padx=28, pady=(8, 20))
+        bar.grid(row=4, column=0, sticky="ew", padx=30, pady=(8, 22))
         bar.grid_columnconfigure(0, weight=1)
 
         self._status_var = tk.StringVar(value="Ready")
@@ -296,11 +320,8 @@ class MusicSoftwareScannerView(ctk.CTkFrame):
         ).grid(row=0, column=0, sticky="w")
 
         self._count_label = ctk.CTkLabel(
-            bar,
-            text="",
-            font=ctk.CTkFont(size=11),
-            text_color=TEXT_MUTED,
-            anchor="e",
+            bar, text="",
+            font=ctk.CTkFont(size=11), text_color=TEXT_MUTED, anchor="e",
         )
         self._count_label.grid(row=0, column=1, sticky="e")
 
@@ -328,6 +349,8 @@ class MusicSoftwareScannerView(ctk.CTkFrame):
         self._scanning = False
         self._scan_btn.configure(state="normal", text="  ♬  Scan Apps")
         self._update_cards(apps)
+        if self._on_apps_ready is not None:
+            self._on_apps_ready(apps)
 
         if apps:
             self._apply_filter(self._search_var.get())
@@ -339,8 +362,6 @@ class MusicSoftwareScannerView(ctk.CTkFrame):
 
         n = len(apps)
         self._count_label.configure(text=f"{n:,} {'app' if n == 1 else 'apps'}")
-
-    # ── Summary cards ─────────────────────────────────────────────────────────
 
     def _update_cards(self, apps: list[MusicApp]) -> None:
         total    = len(apps)
@@ -355,8 +376,6 @@ class MusicSoftwareScannerView(ctk.CTkFrame):
         self._card_labels["daws"].configure(text=str(daws))
         self._card_labels["managers"].configure(text=str(managers))
         self._card_labels["hardware"].configure(text=str(hardware))
-
-    # ── Table population ──────────────────────────────────────────────────────
 
     def _clear_table(self) -> None:
         for row in self._tree.get_children():
@@ -375,8 +394,6 @@ class MusicSoftwareScannerView(ctk.CTkFrame):
         else:
             self._empty_label.configure(text="No results match your search.")
             self._empty_label.grid()
-
-    # ── Search ────────────────────────────────────────────────────────────────
 
     def _on_search(self, *_) -> None:
         self._apply_filter(self._search_var.get())
@@ -402,8 +419,6 @@ class MusicSoftwareScannerView(ctk.CTkFrame):
         extra = f" of {total:,}" if q and displayed != total else ""
         self._count_label.configure(text=f"{displayed:,} {suffix}{extra}")
 
-    # ── Reveal in Finder ──────────────────────────────────────────────────────
-
     def _on_tree_select(self, _event=None) -> None:
         has_sel = bool(self._tree.selection())
         self._reveal_btn.configure(
@@ -415,7 +430,6 @@ class MusicSoftwareScannerView(ctk.CTkFrame):
         selected = self._tree.selection()
         if not selected:
             return
-        # PATH is column index 4 in the row tuple (name, category, developer, version, path, modified)
         path = self._tree.item(selected[0], "values")[4]
         if path:
             subprocess.run(["open", "-R", path], check=False)

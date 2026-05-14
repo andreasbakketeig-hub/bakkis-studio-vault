@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Bakkis Studio Vault — entry point.
+Bakkis Studio Manager — entry point.
 """
 
 import sys

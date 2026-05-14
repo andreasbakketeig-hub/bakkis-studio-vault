@@ -1,4 +1,4 @@
-# Bakkis Studio Vault
+# Bakkis Studio Manager
 
 A macOS desktop app for managing your professional studio setup — built with Python and CustomTkinter.
 
@@ -7,7 +7,7 @@ A macOS desktop app for managing your professional studio setup — built with P
 | Module | Status |
 |--------|--------|
 | Plug-in Scanner | ✅ Available |
-| License Vault | 🔜 Coming soon |
+| License Manager | 🔜 Coming soon |
 | Hardware Inventory | 🔜 Coming soon |
 | MIDI Devices | 🔜 Coming soon |
 | Studio Mapper | 🔜 Coming soon |
@@ -52,7 +52,7 @@ python main.py
 ## Project structure
 
 ```
-bakkis-studio-vault/
+bakkis-studio-manager/
 ├── main.py                     # Entry point
 ├── requirements.txt
 ├── app/

@@ -319,7 +319,7 @@ def export_migration_csv(
     with dest.open("w", newline="", encoding="utf-8") as fh:
         w = csv.writer(fh)
 
-        w.writerow(["BAKKIS STUDIO VAULT — Migration Report"])
+        w.writerow(["BAKKIS STUDIO MANAGER — Migration Report"])
         w.writerow([f"Generated: {snapshot.created_at}"])
         w.writerow([f"System: {snapshot.hostname}"])
         w.writerow([])
@@ -435,7 +435,7 @@ def export_migration_html(
 </head>
 <body>
 
-<h1>Bakkis Studio Vault — Migration Report</h1>
+<h1>Bakkis Studio Manager — Migration Report</h1>
 <div class="meta">
   Generated: {snapshot.created_at} &nbsp;·&nbsp; Source system: <strong>{snapshot.hostname}</strong>
 </div>

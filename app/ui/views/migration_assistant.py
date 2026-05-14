@@ -39,23 +39,25 @@ from app.core.scanner import Plugin, scan_plugins
 if TYPE_CHECKING:
     pass
 
-# ── Palette ───────────────────────────────────────────────────────────────────
+# ── Design System ─────────────────────────────────────────────────────────────
 
-BG_MAIN      = "#10131C"
-BG_CARD      = "#13161F"
-BG_TABLE     = "#0F1117"
-BG_ROW_EVEN  = "#13161F"
-BG_ROW_ODD   = "#10131C"
+BG_MAIN      = "#0D1020"
+BG_CARD      = "#131720"
+BG_TABLE     = "#0D1020"
+BG_ROW_EVEN  = "#131720"
+BG_ROW_ODD   = "#161B28"
 ACCENT       = "#6C8EF5"
-ACCENT_HOVER = "#5A7CE8"
-WARN         = "#F5A623"
-SUCCESS      = "#4CAF82"
-DANGER       = "#F55353"
-TEXT_PRIMARY = "#E8EAF0"
-TEXT_MUTED   = "#6B7280"
-BORDER       = "#1C1F2E"
-BTN_SEC      = "#1A1D2E"
-BTN_SEC_HVR  = "#1C1F2E"
+ACCENT_HOVER = "#8BAAF7"
+WARN         = "#F59E0B"
+SUCCESS      = "#4ADE80"
+DANGER       = "#F87171"
+TEXT_PRIMARY = "#EEF0F8"
+TEXT_SECONDARY = "#94A3B8"
+TEXT_MUTED   = "#4B5870"
+BORDER       = "#1C2038"
+BORDER_BRIGHT = "#242B48"
+BTN_SEC      = "#161B28"
+BTN_SEC_HVR  = "#1C2038"
 
 _TAG_STATUS = {
     STATUS_INSTALLED:    "installed",
@@ -98,7 +100,7 @@ class MigrationAssistantView(ctk.CTkFrame):
 
     def _build_header(self) -> None:
         hdr = ctk.CTkFrame(self, fg_color="transparent")
-        hdr.grid(row=0, column=0, sticky="ew", padx=24, pady=(20, 0))
+        hdr.grid(row=0, column=0, sticky="ew", padx=28, pady=(28, 0))
 
         ctk.CTkLabel(
             hdr,
@@ -110,7 +112,7 @@ class MigrationAssistantView(ctk.CTkFrame):
 
         ctk.CTkLabel(
             hdr,
-            text="Snapshot · Compare · Migrate",
+            text="Snapshot  ·  Compare  ·  Migrate",
             font=ctk.CTkFont(size=12),
             text_color=ACCENT,
             anchor="w",
@@ -124,12 +126,12 @@ class MigrationAssistantView(ctk.CTkFrame):
             segmented_button_selected_color=ACCENT,
             segmented_button_selected_hover_color=ACCENT_HOVER,
             segmented_button_unselected_color=BG_MAIN,
-            segmented_button_unselected_hover_color=BORDER,
+            segmented_button_unselected_hover_color=BORDER_BRIGHT,
             text_color=TEXT_PRIMARY,
             text_color_disabled=TEXT_MUTED,
-            corner_radius=12,
+            corner_radius=14,
         )
-        self._tabview.grid(row=1, column=0, sticky="nsew", padx=24, pady=(10, 20))
+        self._tabview.grid(row=1, column=0, sticky="nsew", padx=28, pady=(12, 24))
 
         for name in ("  Snapshot  ", "  Report  ", "  Compare  ", "  Dashboard  "):
             self._tabview.add(name)
@@ -913,7 +915,7 @@ class MigrationAssistantView(ctk.CTkFrame):
 
 # ── Shared style helper ───────────────────────────────────────────────────────
 
-def _apply_tree_style(name: str, row_height: int = 30) -> None:
+def _apply_tree_style(name: str, row_height: int = 32) -> None:
     style = ttk.Style()
     style.configure(
         name,
@@ -932,5 +934,5 @@ def _apply_tree_style(name: str, row_height: int = 30) -> None:
         font=("SF Pro Text", 10, "bold"),
         borderwidth=0,
     )
-    style.map(name, background=[("selected", "#2A2D45")])
+    style.map(name, background=[("selected", "#1B2848")])
     style.layout(name, [(f"{name}.treearea", {"sticky": "nsew"})])
