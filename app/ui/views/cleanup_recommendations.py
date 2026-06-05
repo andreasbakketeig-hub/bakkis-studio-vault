@@ -13,6 +13,12 @@ from typing import Callable, Optional
 import customtkinter as ctk
 
 from app.core.cleanup import (
+    ACT_ACTIONABLE,
+    ACT_ALREADY_QUAR,
+    ACT_MISSING_PATH,
+    ACT_NEEDS_PICKER,
+    ACT_SYSTEM_LOCKED,
+    ACT_UNSUPPORTED,
     CONF_REVIEW,
     CONF_SAFE,
     CONF_UNKNOWN,
@@ -23,13 +29,18 @@ from app.core.cleanup import (
     PROFILE_LOGIC,
     PROFILE_PRO_TOOLS,
     PROFILE_CUSTOM,
+    SYSTEM_LOCKED_REASON,
+    ActionabilitySummary,
     CleanupRecommendation,
     DawProfile,
     RedundantFormatPath,
     analyze_cleanup,
     can_offer_cleanup_quarantine,
+    classify_rec_actionability,
+    cleanup_actionability_summary,
     cleanup_quarantine_block_reason,
     cleanup_quarantine_reason,
+    generate_cleanup_report_rows,
     get_profile,
     make_custom_profile,
     redundant_format_paths,
@@ -47,6 +58,7 @@ from app.core.quarantine import (
 )
 from app.core.scanner import Plugin, _fmt_size
 from app.ui.dialogs.cleanup_format_picker import CleanupFormatPickerDialog
+from app.ui.dialogs.cleanup_export import export_cleanup_report
 from app.ui.dialogs.quarantine_confirm import (
     QuarantineConfirmDialog,
     QuarantineConfirmTarget,
@@ -86,20 +98,35 @@ CONF_COLORS: dict[str, str] = {
     CONF_UNKNOWN: ACCENT_UNKNOWN,
 }
 
+# Actionability row colors
+ACCENT_LOCKED   = "#F87171"  # red-ish for system-locked
+ACCENT_ALREADY  = "#64748B"  # slate for already quarantined
+
+ACT_COLORS: dict[str, str] = {
+    ACT_ACTIONABLE:    ACCENT_SAFE,
+    ACT_NEEDS_PICKER:  ACCENT,
+    ACT_SYSTEM_LOCKED: ACCENT_LOCKED,
+    ACT_ALREADY_QUAR:  ACCENT_ALREADY,
+    ACT_MISSING_PATH:  ACCENT_UNKNOWN,
+    ACT_UNSUPPORTED:   ACCENT_UNKNOWN,
+}
+
 _CUSTOM_FMT_ORDER: list[str] = ["VST3", "AU", "VST", "AAX"]
 
-FILTER_ALL       = "all"
-FILTER_SAFE      = "safe"
-FILTER_REVIEW    = "review"
-FILTER_HIGH_DISK = "high_disk"
-FILTER_MULTI     = "multi"
+FILTER_ALL           = "all"
+FILTER_ACTIONABLE    = "actionable"
+FILTER_SYSTEM_LOCKED = "system_locked_f"
+FILTER_NEEDS_REVIEW  = "needs_review"
+FILTER_ALREADY_QUAR  = "already_quar"
+FILTER_HIGH_DISK     = "high_disk"
 
 _FILTERS: list[tuple[str, str]] = [
-    (FILTER_ALL,       "All"),
-    (FILTER_SAFE,      "Safe"),
-    (FILTER_REVIEW,    "Review"),
-    (FILTER_HIGH_DISK, "High Disk"),
-    (FILTER_MULTI,     "Multi-Format"),
+    (FILTER_ALL,           "All"),
+    (FILTER_ACTIONABLE,    "Actionable"),
+    (FILTER_SYSTEM_LOCKED, "System Locked"),
+    (FILTER_NEEDS_REVIEW,  "Needs Review"),
+    (FILTER_ALREADY_QUAR,  "Already Quarantined"),
+    (FILTER_HIGH_DISK,     "High Disk"),
 ]
 
 _ROW_HEADER  = 0
@@ -109,6 +136,8 @@ _ROW_FILTERS = 3
 _ROW_HELPER  = 4
 _ROW_TABLE   = 5
 _ROW_STATUS  = 6
+
+_SYSTEM_LOCKED_LABEL = "System Locked — Manual/Vendor Cleanup"
 
 
 class CleanupRecommendationsView(ctk.CTkFrame):
@@ -130,6 +159,8 @@ class CleanupRecommendationsView(ctk.CTkFrame):
         self._filter_btns: dict[str, ctk.CTkButton] = {}
         self._profile_btns: dict[str, ctk.CTkButton] = {}
         self._iid_to_rec: dict[str, CleanupRecommendation] = {}
+        self._iid_to_act: dict[str, tuple[str, str]] = {}   # iid → (act_status, reason)
+        self._act_summary: ActionabilitySummary | None = None
         self._selected_quarantine_path: str | None = None
         self._on_quarantine_complete = on_quarantine_complete
         self._scan_paths: list[str] = list(scan_paths or [])
@@ -289,14 +320,16 @@ class CleanupRecommendationsView(ctk.CTkFrame):
     def _build_stats_row(self) -> None:
         row = ctk.CTkFrame(self, fg_color="transparent")
         row.grid(row=_ROW_STATS, column=0, sticky="ew", padx=30, pady=(14, 0))
-        for i in range(4):
+        for i in range(5):
             row.grid_columnconfigure(i, weight=1, uniform="cstat")
 
-        safe_label = "NEEDS REVIEW" if self._safe_mode else "SAFE TO REMOVE"
-        self._stat_analyzed = self._make_stat_card(row, 0, "PRODUCTS ANALYZED",     "—", ACCENT)
-        self._stat_flagged  = self._make_stat_card(row, 1, "FORMATS FLAGGED",        "—", ACCENT_WARN)
-        self._stat_safe     = self._make_stat_card(row, 2, safe_label,               "—", ACCENT_SAFE)
-        self._stat_space    = self._make_stat_card(row, 3, "EST. RECOVERABLE SPACE", "—", ACCENT_GREEN)
+        self._stat_analyzed   = self._make_stat_card(row, 0, "PRODUCTS ANALYZED",   "—", ACCENT)
+        self._stat_flagged    = self._make_stat_card(row, 1, "FORMATS FLAGGED",      "—", ACCENT_WARN)
+        self._stat_actionable = self._make_stat_card(row, 2, "ACTIONABLE CLEANUP",   "—", ACCENT_SAFE,
+                                                     subtitle="Can quarantine")
+        self._stat_locked     = self._make_stat_card(row, 3, "SYSTEM-LOCKED",        "—", ACCENT_LOCKED,
+                                                     subtitle="Manual/vendor cleanup")
+        self._stat_space, self._stat_space_detail = self._make_space_stat_card(row, 4)
 
     def _make_stat_card(
         self,
@@ -305,8 +338,10 @@ class CleanupRecommendationsView(ctk.CTkFrame):
         label: str,
         initial: str,
         color: str,
+        *,
+        subtitle: str = "",
     ) -> ctk.CTkLabel:
-        pad = (0, 10) if col < 3 else (0, 0)
+        pad = (0, 10) if col < 4 else (0, 0)
         card = ctk.CTkFrame(
             parent, fg_color=BG_CARD, corner_radius=12,
             border_width=1, border_color=BORDER,
@@ -318,15 +353,59 @@ class CleanupRecommendationsView(ctk.CTkFrame):
             card, text=label,
             font=ctk.CTkFont(size=10, weight="bold"),
             text_color=TEXT_MUTED, anchor="w",
-        ).grid(row=0, column=0, sticky="w", padx=18, pady=(16, 2))
+        ).grid(row=0, column=0, sticky="w", padx=16, pady=(14, 2))
 
         lbl = ctk.CTkLabel(
             card, text=initial,
-            font=ctk.CTkFont(size=28, weight="bold"),
+            font=ctk.CTkFont(size=26, weight="bold"),
             text_color=color, anchor="w",
         )
-        lbl.grid(row=1, column=0, sticky="w", padx=18, pady=(0, 16))
+        lbl.grid(row=1, column=0, sticky="w", padx=16, pady=(0, 2 if subtitle else 14))
+
+        if subtitle:
+            ctk.CTkLabel(
+                card, text=subtitle,
+                font=ctk.CTkFont(size=10),
+                text_color=TEXT_MUTED, anchor="w",
+            ).grid(row=2, column=0, sticky="w", padx=16, pady=(0, 10))
+
         return lbl
+
+    def _make_space_stat_card(
+        self,
+        parent: ctk.CTkFrame,
+        col: int,
+    ) -> tuple[ctk.CTkLabel, ctk.CTkLabel]:
+        """Space card with total value + actionable/locked breakdown detail line."""
+        card = ctk.CTkFrame(
+            parent, fg_color=BG_CARD, corner_radius=12,
+            border_width=1, border_color=BORDER,
+        )
+        card.grid(row=0, column=col, sticky="ew")
+        card.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(
+            card, text="EST. RECOVERABLE SPACE",
+            font=ctk.CTkFont(size=10, weight="bold"),
+            text_color=TEXT_MUTED, anchor="w",
+        ).grid(row=0, column=0, sticky="w", padx=16, pady=(14, 2))
+
+        value_lbl = ctk.CTkLabel(
+            card, text="—",
+            font=ctk.CTkFont(size=26, weight="bold"),
+            text_color=ACCENT_GREEN, anchor="w",
+        )
+        value_lbl.grid(row=1, column=0, sticky="w", padx=16, pady=(0, 2))
+
+        detail_lbl = ctk.CTkLabel(
+            card, text="",
+            font=ctk.CTkFont(size=10),
+            text_color=TEXT_MUTED, anchor="w",
+            wraplength=200,
+        )
+        detail_lbl.grid(row=2, column=0, sticky="w", padx=16, pady=(0, 10))
+
+        return value_lbl, detail_lbl
 
     def _build_filter_bar(self) -> None:
         bar = ctk.CTkFrame(self, fg_color="transparent")
@@ -357,13 +436,14 @@ class CleanupRecommendationsView(ctk.CTkFrame):
         ctk.CTkLabel(
             note,
             text=(
-                "Recommendations are read-only. Quarantine moves one selected "
-                "plug-in file only after confirmation."
+                "Studio Vault can quarantine files only when macOS permissions allow it.  "
+                "System-wide plug-ins are shown as  System Locked  and should be handled "
+                "with the vendor's installer or by revealing the file in Finder."
             ),
             font=ctk.CTkFont(size=11),
             text_color=TEXT_SECONDARY,
             anchor="w",
-            wraplength=900,
+            wraplength=980,
         ).pack(fill="x", padx=14, pady=10)
 
     def _build_table(self) -> None:
@@ -409,20 +489,20 @@ class CleanupRecommendationsView(ctk.CTkFrame):
         )
         style.layout("Cleanup.Treeview", [("Cleanup.Treeview.treearea", {"sticky": "nswe"})])
 
-        columns = ("name", "developer", "installed", "keep", "redundant", "space", "confidence")
+        columns = ("name", "developer", "installed", "keep", "redundant", "space", "status")
         self._tree = ttk.Treeview(
             tree_frame, columns=columns,
             show="headings", style="Cleanup.Treeview", selectmode="browse",
         )
 
         col_cfg = [
-            ("name",       "PLUGIN NAME",        200, True,  "w"),
-            ("developer",  "DEVELOPER",           140, True,  "w"),
-            ("installed",  "INSTALLED FORMATS",   160, False, "w"),
-            ("keep",       "KEEP",                130, False, "w"),
-            ("redundant",  "SUGGESTED REMOVAL",   150, False, "w"),
-            ("space",      "RECOVERABLE",          95, False, "e"),
-            ("confidence", "CONFIDENCE",            90, False, "center"),
+            ("name",      "PLUGIN NAME",        200, True,  "w"),
+            ("developer", "DEVELOPER",           140, True,  "w"),
+            ("installed", "INSTALLED FORMATS",   160, False, "w"),
+            ("keep",      "KEEP",                130, False, "w"),
+            ("redundant", "SUGGESTED REMOVAL",   150, False, "w"),
+            ("space",     "RECOVERABLE",          95, False, "e"),
+            ("status",    "STATUS",              148, False, "w"),
         ]
         for col_id, heading, width, stretch, anchor in col_cfg:
             self._tree.heading(col_id, text=heading)
@@ -440,6 +520,10 @@ class CleanupRecommendationsView(ctk.CTkFrame):
             self._tree.tag_configure(f"{conf}_odd",  background=BG_TABLE_ROW_ALT, foreground=color)
         self._tree.tag_configure("none_even", background=BG_TABLE_ROW,     foreground=TEXT_MUTED)
         self._tree.tag_configure("none_odd",  background=BG_TABLE_ROW_ALT, foreground=TEXT_MUTED)
+        # Actionability-specific tags (override row color for status column)
+        for act_status, color in ACT_COLORS.items():
+            self._tree.tag_configure(f"act_{act_status}_even", background=BG_TABLE_ROW,     foreground=color)
+            self._tree.tag_configure(f"act_{act_status}_odd",  background=BG_TABLE_ROW_ALT, foreground=color)
 
         self._tree.bind("<<TreeviewSelect>>", self._on_select)
 
@@ -466,9 +550,42 @@ class CleanupRecommendationsView(ctk.CTkFrame):
             font=ctk.CTkFont(size=10),
             text_color=ACCENT_WARN,
             anchor="w",
-            wraplength=520,
+            wraplength=500,
         )
         self._quarantine_help.grid(row=1, column=0, sticky="w", pady=(4, 0))
+
+        self._export_btn = ctk.CTkButton(
+            bar,
+            text="↗  Export Report",
+            width=135,
+            height=34,
+            corner_radius=9,
+            font=ctk.CTkFont(size=12),
+            fg_color=BG_CARD,
+            hover_color=BORDER_BRIGHT,
+            text_color=TEXT_MUTED,
+            border_width=1,
+            border_color=BORDER,
+            command=self._export_report,
+        )
+        self._export_btn.grid(row=0, column=1, sticky="e", padx=(0, 8))
+
+        self._copy_path_btn = ctk.CTkButton(
+            bar,
+            text="⎘  Copy Path",
+            width=115,
+            height=34,
+            corner_radius=9,
+            font=ctk.CTkFont(size=12),
+            fg_color=BG_CARD,
+            hover_color=BORDER_BRIGHT,
+            text_color=TEXT_MUTED,
+            border_width=1,
+            border_color=BORDER,
+            command=self._copy_path,
+            state="disabled",
+        )
+        self._copy_path_btn.grid(row=0, column=2, sticky="e", padx=(0, 8))
 
         self._reveal_btn = ctk.CTkButton(
             bar,
@@ -485,7 +602,7 @@ class CleanupRecommendationsView(ctk.CTkFrame):
             command=self._reveal_in_finder,
             state="disabled",
         )
-        self._reveal_btn.grid(row=0, column=1, sticky="e", padx=(0, 8))
+        self._reveal_btn.grid(row=0, column=3, sticky="e", padx=(0, 8))
 
         self._quarantine_btn = ctk.CTkButton(
             bar,
@@ -502,7 +619,7 @@ class CleanupRecommendationsView(ctk.CTkFrame):
             command=self._quarantine_selected,
             state="disabled",
         )
-        self._quarantine_btn.grid(row=0, column=2, sticky="e")
+        self._quarantine_btn.grid(row=0, column=4, sticky="e")
 
     # ── Public API ────────────────────────────────────────────────────────────
 
@@ -568,6 +685,7 @@ class CleanupRecommendationsView(ctk.CTkFrame):
     def _reanalyze(self) -> None:
         if not self._plugins:
             self._recs = []
+            self._act_summary = None
             self._show_empty_state(initial=False)
             self._reset_stats()
             return
@@ -575,6 +693,7 @@ class CleanupRecommendationsView(ctk.CTkFrame):
         profile = self._active_profile()
         if self._active_profile_key == PROFILE_CUSTOM and not profile.preferred:
             self._recs = []
+            self._act_summary = None
             self._empty_label.configure(
                 text="Select at least one preferred format above to generate recommendations."
             )
@@ -593,6 +712,11 @@ class CleanupRecommendationsView(ctk.CTkFrame):
                 if r.confidence == CONF_SAFE else r
                 for r in self._recs
             ]
+
+        # Compute actionability summary (file I/O per redundant path).
+        self._act_summary = cleanup_actionability_summary(
+            self._recs, scan_paths=self._scan_paths or None,
+        )
 
         self._active_filter = FILTER_ALL
         self._update_filter_buttons()
@@ -616,14 +740,33 @@ class CleanupRecommendationsView(ctk.CTkFrame):
             )
 
     def _filtered_recs(self) -> list[CleanupRecommendation]:
-        if self._active_filter == FILTER_SAFE:
-            return [r for r in self._recs if r.confidence == CONF_SAFE and r.has_redundant]
-        if self._active_filter == FILTER_REVIEW:
-            return [r for r in self._recs if r.confidence == CONF_REVIEW]
         if self._active_filter == FILTER_HIGH_DISK:
             return [r for r in self._recs if r.is_high_disk_usage]
-        if self._active_filter == FILTER_MULTI:
-            return [r for r in self._recs if r.is_multi_format]
+
+        if self._active_filter in (
+            FILTER_ACTIONABLE, FILTER_SYSTEM_LOCKED,
+            FILTER_NEEDS_REVIEW, FILTER_ALREADY_QUAR,
+        ):
+            out: list[CleanupRecommendation] = []
+            scan = self._scan_paths or None
+            for r in self._recs:
+                if not r.has_redundant:
+                    continue
+                status, _ = classify_rec_actionability(r, scan_paths=scan)
+                if self._active_filter == FILTER_ACTIONABLE:
+                    if status in (ACT_ACTIONABLE, ACT_NEEDS_PICKER):
+                        out.append(r)
+                elif self._active_filter == FILTER_SYSTEM_LOCKED:
+                    if status == ACT_SYSTEM_LOCKED:
+                        out.append(r)
+                elif self._active_filter == FILTER_NEEDS_REVIEW:
+                    if status in (ACT_UNSUPPORTED, ACT_MISSING_PATH):
+                        out.append(r)
+                elif self._active_filter == FILTER_ALREADY_QUAR:
+                    if status == ACT_ALREADY_QUAR:
+                        out.append(r)
+            return out
+
         return self._recs
 
     def _show_empty_state(self, *, initial: bool) -> None:
@@ -636,27 +779,52 @@ class CleanupRecommendationsView(ctk.CTkFrame):
         self._empty_label.grid()
 
     def _reset_stats(self) -> None:
-        for lbl in (self._stat_analyzed, self._stat_flagged, self._stat_safe, self._stat_space):
+        for lbl in (
+            self._stat_analyzed, self._stat_flagged,
+            self._stat_actionable, self._stat_locked, self._stat_space,
+        ):
             lbl.configure(text="—")
+        self._stat_space_detail.configure(text="")
         self._status_label.configure(text="")
 
     def _update_stat_cards(self) -> None:
         if not self._recs:
             self._reset_stats()
             return
+
         total_analyzed = len(self._recs)
         total_flagged  = sum(len(r.redundant_formats) for r in self._recs)
-        total_safe     = sum(1 for r in self._recs if r.confidence == CONF_SAFE and r.has_redundant)
-        total_space    = sum(r.recoverable_size for r in self._recs)
         self._stat_analyzed.configure(text=str(total_analyzed))
         self._stat_flagged.configure(text=str(total_flagged))
-        self._stat_safe.configure(text=str(total_safe))
-        self._stat_space.configure(text=_fmt_size(total_space) if total_space else "0 B")
+
+        s = self._act_summary
+        if s:
+            actionable_count = s.recs_actionable + s.recs_needs_picker
+            self._stat_actionable.configure(text=str(actionable_count))
+            self._stat_locked.configure(text=str(s.recs_system_locked))
+            self._stat_space.configure(
+                text=s.total_size_human if s.total_bytes else "0 B"
+            )
+            detail_parts: list[str] = []
+            if s.actionable_bytes:
+                detail_parts.append(f"{s.actionable_size_human} actionable")
+            if s.system_locked_bytes:
+                detail_parts.append(f"{s.system_locked_size_human} system-locked")
+            self._stat_space_detail.configure(
+                text="  ·  ".join(detail_parts) if detail_parts else ""
+            )
+        else:
+            total_space = sum(r.recoverable_size for r in self._recs)
+            self._stat_actionable.configure(text="—")
+            self._stat_locked.configure(text="—")
+            self._stat_space.configure(text=_fmt_size(total_space) if total_space else "0 B")
+            self._stat_space_detail.configure(text="")
 
     def _populate(self) -> None:
         for iid in self._tree.get_children():
             self._tree.delete(iid)
         self._iid_to_rec.clear()
+        self._iid_to_act.clear()
         self._selected_quarantine_path = None
         self._update_action_buttons(None)
 
@@ -673,7 +841,8 @@ class CleanupRecommendationsView(ctk.CTkFrame):
 
         self._empty_label.grid_remove()
 
-        conf_row: dict[str, int] = {CONF_SAFE: 0, CONF_REVIEW: 0, CONF_UNKNOWN: 0, "none": 0}
+        scan = self._scan_paths or None
+        row_idx = 0
 
         for rec in recs:
             installed_str = "  ·  ".join(
@@ -683,19 +852,26 @@ class CleanupRecommendationsView(ctk.CTkFrame):
             redundant_str = "  ·  ".join(rec.redundant_formats) if rec.redundant_formats else "—"
             space_str     = rec.recoverable_size_human if rec.has_redundant else "—"
 
-            tag_key = rec.confidence if rec.has_redundant else "none"
-            idx     = conf_row.get(tag_key, 0)
-            parity  = "even" if idx % 2 == 0 else "odd"
-            tag     = f"{tag_key}_{parity}"
-            conf_row[tag_key] = idx + 1
+            if rec.has_redundant:
+                act_status, act_reason = classify_rec_actionability(rec, scan_paths=scan)
+                from app.core.cleanup import _ACT_LABELS  # noqa: PLC0415
+                status_str = _ACT_LABELS.get(act_status, act_status)
+            else:
+                act_status, act_reason = ACT_UNSUPPORTED, ""
+                status_str = "—"
+
+            parity = "even" if row_idx % 2 == 0 else "odd"
+            tag    = f"act_{act_status}_{parity}"
+            row_idx += 1
 
             iid = self._tree.insert(
                 "", "end",
                 values=(rec.product_name, rec.developer or "—", installed_str,
-                        keep_str, redundant_str, space_str, rec.confidence),
+                        keep_str, redundant_str, space_str, status_str),
                 tags=(tag,),
             )
             self._iid_to_rec[iid] = rec
+            self._iid_to_act[iid] = (act_status, act_reason)
 
         self._update_status(len(recs))
 
@@ -721,38 +897,74 @@ class CleanupRecommendationsView(ctk.CTkFrame):
 
     def _on_select(self, _event=None) -> None:
         selected = self._tree.selection()
-        rec = self._iid_to_rec.get(selected[0]) if selected else None
+        iid = selected[0] if selected else None
+        rec = self._iid_to_rec.get(iid) if iid else None
         self._selected_quarantine_path = None
         if rec:
             paths = redundant_format_paths(rec)
             if len(paths) == 1 and rec.confidence != CONF_UNKNOWN:
                 self._selected_quarantine_path = paths[0].path
-        self._update_action_buttons(rec)
+        act_status, act_reason = self._iid_to_act.get(iid, (ACT_UNSUPPORTED, "")) if iid else (ACT_UNSUPPORTED, "")
+        self._update_action_buttons(rec, act_status=act_status, act_reason=act_reason)
 
-    def _update_action_buttons(self, rec: CleanupRecommendation | None) -> None:
+    def _update_action_buttons(
+        self,
+        rec: CleanupRecommendation | None,
+        *,
+        act_status: str = ACT_UNSUPPORTED,
+        act_reason: str = "",
+    ) -> None:
         has_sel = rec is not None
+
+        # ── Reveal in Finder: always enabled when a row is selected ──────────
         self._reveal_btn.configure(
             state="normal" if has_sel else "disabled",
             text_color=TEXT_PRIMARY if has_sel else TEXT_MUTED,
         )
-        can_q = False
-        help_text = ""
-        if rec:
-            scan = self._scan_paths or None
-            can_q = can_offer_cleanup_quarantine(
-                rec,
-                scan_paths=scan,
-                path_quarantined_check=is_path_quarantined,
-            )
-            if not can_q:
-                help_text = cleanup_quarantine_block_reason(
-                    rec, scan_paths=scan,
-                )
+
+        # ── Copy Path: enabled when a row with known paths is selected ────────
+        has_paths = has_sel and bool(redundant_format_paths(rec))
+        self._copy_path_btn.configure(
+            state="normal" if has_paths else "disabled",
+            text_color=TEXT_PRIMARY if has_paths else TEXT_MUTED,
+        )
+
+        # ── Quarantine: enabled only for actionable rows ──────────────────────
+        can_q = act_status in (ACT_ACTIONABLE, ACT_NEEDS_PICKER) and has_sel
         self._quarantine_btn.configure(
             state="normal" if can_q else "disabled",
+            fg_color=ACCENT if can_q else BG_CARD,
             text_color=TEXT_PRIMARY if can_q else TEXT_MUTED,
         )
-        self._quarantine_help.configure(text=help_text)
+
+        # ── Help text ─────────────────────────────────────────────────────────
+        if not has_sel:
+            self._quarantine_help.configure(text="", text_color=ACCENT_WARN)
+        elif act_status == ACT_SYSTEM_LOCKED:
+            self._quarantine_help.configure(
+                text=SYSTEM_LOCKED_REASON,
+                text_color=ACCENT_LOCKED,
+            )
+        elif act_status == ACT_ALREADY_QUAR:
+            self._quarantine_help.configure(
+                text="All redundant copies are already in quarantine.",
+                text_color=ACCENT_UNKNOWN,
+            )
+        elif act_status == ACT_MISSING_PATH:
+            self._quarantine_help.configure(
+                text=act_reason or "No on-disk path found for this format.",
+                text_color=ACCENT_WARN,
+            )
+        elif not can_q and rec:
+            fallback = cleanup_quarantine_block_reason(
+                rec, scan_paths=self._scan_paths or None,
+            )
+            self._quarantine_help.configure(
+                text=fallback or act_reason,
+                text_color=ACCENT_WARN,
+            )
+        else:
+            self._quarantine_help.configure(text="", text_color=ACCENT_WARN)
 
     def _selected_rec(self) -> CleanupRecommendation | None:
         selected = self._tree.selection()
@@ -919,3 +1131,59 @@ class CleanupRecommendationsView(ctk.CTkFrame):
             path = rec.installed_formats[target_fmt].path
             if path:
                 subprocess.run(["open", "-R", path], check=False)
+
+    def _copy_path(self) -> None:
+        """Copy the first redundant path for the selected row to the clipboard.
+
+        When multiple paths exist the user is presented with a quick picker so
+        they can choose which path to copy.
+        """
+        selected = self._tree.selection()
+        if not selected:
+            return
+        rec = self._iid_to_rec.get(selected[0])
+        if not rec:
+            return
+
+        paths = redundant_format_paths(rec)
+        if not paths:
+            return
+
+        if len(paths) == 1:
+            self._do_copy_path(paths[0].path)
+            return
+
+        # Multiple paths — show a mini picker dialog reusing the existing
+        # CleanupFormatPickerDialog (it already handles multi-path selection).
+        def _on_pick(item):
+            self._do_copy_path(item.path)
+
+        root = self.winfo_toplevel()
+        CleanupFormatPickerDialog(
+            root,
+            rec,
+            _on_pick,
+            path_quarantined_check=is_path_quarantined,
+            scan_paths=self._scan_paths or None,
+        )
+
+    @staticmethod
+    def _do_copy_path(path: str) -> None:
+        import tkinter as _tk  # noqa: PLC0415
+        root = _tk.Tk()
+        root.withdraw()
+        try:
+            root.clipboard_clear()
+            root.clipboard_append(path)
+            root.update()
+        finally:
+            root.after(500, root.destroy)
+
+    def _export_report(self) -> None:
+        """Open a save dialog and write the cleanup report CSV or Markdown."""
+        redundant_recs = [r for r in self._recs if r.has_redundant]
+        export_cleanup_report(
+            redundant_recs,
+            scan_paths=self._scan_paths or None,
+            parent=self.winfo_toplevel(),
+        )

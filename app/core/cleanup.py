@@ -7,7 +7,7 @@ No files are deleted or quarantined by this module.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from app.core.scanner import FormatGroup, Plugin, _fmt_size, analyze_formats
@@ -397,6 +397,8 @@ def _recommend(group: FormatGroup, profile: DawProfile) -> CleanupRecommendation
 def analyze_cleanup(
     plugins: list[Plugin],
     profile: DawProfile | None = None,
+    *,
+    _profile_override: DawProfile | None = None,
 ) -> list[CleanupRecommendation]:
     """
     Analyze *plugins* and return one :class:`CleanupRecommendation` per
@@ -425,3 +427,267 @@ def analyze_cleanup(
         key=lambda r: r.product_name.lower(),
     )
     return with_redundant + without_redundant
+
+
+# ── Actionability model ───────────────────────────────────────────────────────
+
+ACT_ACTIONABLE    = "actionable_quarantine"
+ACT_SYSTEM_LOCKED = "system_locked"
+ACT_NEEDS_PICKER  = "needs_picker"
+ACT_MISSING_PATH  = "missing_path"
+ACT_ALREADY_QUAR  = "already_quarantined"
+ACT_UNSUPPORTED   = "unsupported"
+
+_ACT_LABELS: dict[str, str] = {
+    ACT_ACTIONABLE:    "Can Quarantine",
+    ACT_SYSTEM_LOCKED: "System Locked",
+    ACT_NEEDS_PICKER:  "Choose Format",
+    ACT_MISSING_PATH:  "No Path",
+    ACT_ALREADY_QUAR:  "Already Quarantined",
+    ACT_UNSUPPORTED:   "Manual Cleanup",
+}
+
+SYSTEM_LOCKED_REASON = (
+    "This plug-in is installed in a protected system location. "
+    "Studio Vault does not use administrator permissions. "
+    "Use Reveal in Finder or the vendor's installer/uninstaller."
+)
+
+
+@dataclass(frozen=True)
+class RowActionability:
+    """Actionability classification for one redundant format copy."""
+
+    fmt: str
+    plugin: Plugin | None
+    path: str
+    status: str
+    reason: str
+    recoverable_size: int
+
+    @property
+    def label(self) -> str:
+        return _ACT_LABELS.get(self.status, self.status)
+
+    @property
+    def recoverable_size_human(self) -> str:
+        return _fmt_size(self.recoverable_size) if self.recoverable_size else "—"
+
+    @property
+    def is_actionable(self) -> bool:
+        return self.status in (ACT_ACTIONABLE, ACT_NEEDS_PICKER)
+
+    @property
+    def is_system_locked(self) -> bool:
+        return self.status == ACT_SYSTEM_LOCKED
+
+
+def _is_system_path(path: str) -> bool:
+    """True when *path* lives in a system-owned location."""
+    p = str(Path(path).expanduser())
+    return p.startswith(("/Library/", "/System/", "/Applications/"))
+
+
+def classify_row_actionability(
+    rec: CleanupRecommendation,
+    fmt: str,
+    *,
+    scan_paths: list[str] | None = None,
+) -> RowActionability:
+    """
+    Classify one redundant format copy for actionability.
+    No files are read or moved; only path metadata is checked.
+    """
+    plugin = rec.installed_formats.get(fmt)
+    path = (plugin.path or "").strip() if plugin else ""
+    size = plugin.file_size if plugin else 0
+
+    def _make(status: str, reason: str) -> RowActionability:
+        return RowActionability(
+            fmt=fmt, plugin=plugin, path=path,
+            status=status, reason=reason, recoverable_size=size,
+        )
+
+    if not path:
+        return _make(ACT_MISSING_PATH, "No file path recorded for this format.")
+
+    try:
+        exists = Path(path).expanduser().exists()
+    except OSError:
+        exists = False
+    if not exists:
+        return _make(ACT_MISSING_PATH, "File path no longer exists on disk.")
+
+    from app.core.quarantine import is_path_quarantined  # noqa: PLC0415
+    if is_path_quarantined(path):
+        return _make(ACT_ALREADY_QUAR, "This copy is already in quarantine.")
+
+    from app.core.quarantine import preflight_quarantine_target  # noqa: PLC0415
+    pf = preflight_quarantine_target(path, scan_paths=scan_paths)
+
+    if pf.can_offer_in_ui or pf.requires_system_ack:
+        return _make(ACT_ACTIONABLE, "Studio Vault can move this file to quarantine.")
+
+    if pf.not_writable or _is_system_path(path):
+        return _make(ACT_SYSTEM_LOCKED, SYSTEM_LOCKED_REASON)
+
+    return _make(ACT_UNSUPPORTED, pf.message or "Not eligible for quarantine.")
+
+
+def classify_rec_actionability(
+    rec: CleanupRecommendation,
+    *,
+    scan_paths: list[str] | None = None,
+) -> tuple[str, str]:
+    """
+    Return ``(status, reason)`` for a whole recommendation.
+
+    Priority: actionable/needs_picker > system_locked > already_quarantined
+              > missing_path > unsupported.
+    """
+    if not rec.has_redundant:
+        return ACT_UNSUPPORTED, "No redundant formats for this product."
+
+    row_acts = [
+        classify_row_actionability(rec, fmt, scan_paths=scan_paths)
+        for fmt in rec.redundant_formats
+    ]
+
+    actionable = [a for a in row_acts if a.status == ACT_ACTIONABLE]
+    if actionable:
+        if len(actionable) > 1 or requires_format_picker(rec):
+            return ACT_NEEDS_PICKER, "Multiple redundant formats — choose one to quarantine."
+        return ACT_ACTIONABLE, actionable[0].reason
+
+    if any(a.status == ACT_SYSTEM_LOCKED for a in row_acts):
+        locked = next(a for a in row_acts if a.status == ACT_SYSTEM_LOCKED)
+        return ACT_SYSTEM_LOCKED, locked.reason
+
+    if all(a.status == ACT_ALREADY_QUAR for a in row_acts):
+        return ACT_ALREADY_QUAR, "All redundant copies are already in quarantine."
+
+    if any(a.status == ACT_MISSING_PATH for a in row_acts):
+        missing = next(a for a in row_acts if a.status == ACT_MISSING_PATH)
+        return ACT_MISSING_PATH, missing.reason
+
+    return ACT_UNSUPPORTED, "Not eligible for quarantine."
+
+
+@dataclass
+class ActionabilitySummary:
+    """Aggregated actionability counts and recoverable sizes."""
+
+    recs_actionable: int = 0
+    recs_system_locked: int = 0
+    recs_needs_picker: int = 0
+    recs_already_quar: int = 0
+    recs_missing: int = 0
+    recs_unsupported: int = 0
+
+    actionable_bytes: int = 0
+    system_locked_bytes: int = 0
+    total_bytes: int = 0
+
+    @property
+    def total_recs_with_status(self) -> int:
+        return (
+            self.recs_actionable + self.recs_needs_picker
+            + self.recs_system_locked + self.recs_already_quar
+            + self.recs_missing + self.recs_unsupported
+        )
+
+    @property
+    def actionable_size_human(self) -> str:
+        return _fmt_size(self.actionable_bytes) if self.actionable_bytes else "0 B"
+
+    @property
+    def system_locked_size_human(self) -> str:
+        return _fmt_size(self.system_locked_bytes) if self.system_locked_bytes else "0 B"
+
+    @property
+    def total_size_human(self) -> str:
+        return _fmt_size(self.total_bytes) if self.total_bytes else "0 B"
+
+
+def cleanup_actionability_summary(
+    recs: list[CleanupRecommendation],
+    *,
+    scan_paths: list[str] | None = None,
+) -> ActionabilitySummary:
+    """Aggregate actionability counts and sizes across all recommendations."""
+    s = ActionabilitySummary()
+    for rec in recs:
+        if not rec.has_redundant:
+            continue
+
+        # Classify each format once, reuse for both rec-level and byte totals.
+        row_acts = {
+            fmt: classify_row_actionability(rec, fmt, scan_paths=scan_paths)
+            for fmt in rec.redundant_formats
+        }
+
+        for act in row_acts.values():
+            s.total_bytes += act.recoverable_size
+            if act.status == ACT_ACTIONABLE:
+                s.actionable_bytes += act.recoverable_size
+            elif act.status == ACT_SYSTEM_LOCKED:
+                s.system_locked_bytes += act.recoverable_size
+
+        actionable_rows = [a for a in row_acts.values() if a.status == ACT_ACTIONABLE]
+        if actionable_rows:
+            if len(actionable_rows) > 1 or requires_format_picker(rec):
+                s.recs_needs_picker += 1
+            else:
+                s.recs_actionable += 1
+        elif any(a.status == ACT_SYSTEM_LOCKED for a in row_acts.values()):
+            s.recs_system_locked += 1
+        elif all(a.status == ACT_ALREADY_QUAR for a in row_acts.values()):
+            s.recs_already_quar += 1
+        elif any(a.status == ACT_MISSING_PATH for a in row_acts.values()):
+            s.recs_missing += 1
+        else:
+            s.recs_unsupported += 1
+
+    return s
+
+
+def generate_cleanup_report_rows(
+    recs: list[CleanupRecommendation],
+    *,
+    scan_paths: list[str] | None = None,
+) -> list[dict]:
+    """Build export rows (one per redundant format copy) for CSV / Markdown."""
+    rows: list[dict] = []
+    for rec in recs:
+        if not rec.has_redundant:
+            continue
+        installed_str = ", ".join(sorted(rec.installed_formats.keys()))
+        keep_str = ", ".join(rec.keep_formats) if rec.keep_formats else ""
+        for fmt in rec.redundant_formats:
+            act = classify_row_actionability(rec, fmt, scan_paths=scan_paths)
+            if act.status in (ACT_ACTIONABLE, ACT_NEEDS_PICKER):
+                suggested = "Quarantine via Studio Vault"
+            elif act.status == ACT_SYSTEM_LOCKED:
+                suggested = "Use vendor uninstaller or Reveal in Finder"
+            elif act.status == ACT_ALREADY_QUAR:
+                suggested = "Already quarantined — no action needed"
+            elif act.status == ACT_MISSING_PATH:
+                suggested = "Locate file manually"
+            else:
+                suggested = "Manual review required"
+
+            rows.append({
+                "Product":                  rec.product_name,
+                "Developer":                rec.developer or "",
+                "Installed Formats":        installed_str,
+                "Keep Formats":             keep_str,
+                "Redundant Format":         fmt,
+                "File Path":                act.path,
+                "Actionability":            act.label,
+                "Reason":                   act.reason,
+                "Est. Recoverable (bytes)": act.recoverable_size,
+                "Est. Recoverable":         act.recoverable_size_human,
+                "Confidence":               rec.confidence,
+                "Suggested Action":         suggested,
+            })
+    return rows
