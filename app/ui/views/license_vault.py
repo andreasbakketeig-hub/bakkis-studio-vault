@@ -159,6 +159,7 @@ class LicenseVaultView(ctk.CTkFrame):
         bar.grid(row=1, column=0, sticky="ew", padx=30, pady=(18, 0))
 
         for i, tab in enumerate(TABS):
+            is_active = tab == self._active_tab
             btn = ctk.CTkButton(
                 bar,
                 text=tab,
@@ -166,11 +167,11 @@ class LicenseVaultView(ctk.CTkFrame):
                 height=34,
                 corner_radius=8,
                 font=ctk.CTkFont(size=12),
-                fg_color=BG_TAB_ACTIVE if tab == self._active_tab else "transparent",
+                fg_color=BG_TAB_ACTIVE if is_active else "transparent",
                 hover_color=BG_TAB_HOVER,
-                text_color=TEXT_PRIMARY if tab == self._active_tab else TEXT_MUTED,
-                border_width=1,
-                border_color=BORDER if tab == self._active_tab else "transparent",
+                text_color=TEXT_PRIMARY if is_active else TEXT_MUTED,
+                border_width=1 if is_active else 0,
+                border_color=BORDER,
                 command=lambda t=tab: self._switch_tab(t),
             )
             btn.pack(side="left", padx=(0, 6) if i < len(TABS) - 1 else 0)
@@ -202,13 +203,14 @@ class LicenseVaultView(ctk.CTkFrame):
         self._tab_buttons[self._active_tab].configure(
             fg_color="transparent",
             text_color=TEXT_MUTED,
-            border_color="transparent",
+            border_width=0,
         )
         self._active_tab = tab
         self._tab_frames[tab].grid()
         self._tab_buttons[tab].configure(
             fg_color=BG_TAB_ACTIVE,
             text_color=TEXT_PRIMARY,
+            border_width=1,
             border_color=BORDER,
         )
 
