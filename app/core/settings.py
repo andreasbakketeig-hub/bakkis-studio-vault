@@ -14,12 +14,19 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from app.db.repositories.settings import SettingsRepository
 
+from pathlib import Path
+
 from app.core.scanner import SCAN_PATHS as DEFAULT_PLUGIN_PATHS
 from app.core.music_software_scanner import SCAN_PATHS as DEFAULT_APP_PATHS
+
+DEFAULT_QUARANTINE_FOLDER = str(
+    Path.home() / "Music" / "Studio Vault Quarantine"
+)
 
 # ── Setting keys ──────────────────────────────────────────────────────────────
 
 # Studio Preferences
+KEY_USER_FULL_NAME       = "user_full_name"
 KEY_PREFERRED_DAW        = "preferred_daw"
 KEY_PREFERRED_FORMATS    = "preferred_formats"
 KEY_MACHINE_ROLE         = "machine_role"
@@ -38,6 +45,7 @@ KEY_NEVER_REMOVE_ONLY    = "never_remove_only_format"
 KEY_LEGACY_VST2_SENS     = "legacy_vst2_sensitivity"
 KEY_IGNORED_VENDORS      = "ignored_vendors"
 KEY_SAFE_MODE_CLEANUP    = "safe_mode_cleanup"
+KEY_QUARANTINE_FOLDER    = "quarantine_folder"
 
 # Migration / Machine Settings
 KEY_MACHINE_DISPLAY_NAME = "machine_display_name"
@@ -98,6 +106,7 @@ class AppSettings:
     """Typed application preferences."""
 
     # Studio Preferences
+    user_full_name: str = ""          # empty = fall back to OS username
     preferred_daw: str = ""
     preferred_formats: list[str] = field(default_factory=lambda: ["VST3", "AU"])
     machine_role: str = "Main Studio"
@@ -120,6 +129,7 @@ class AppSettings:
     legacy_vst2_sensitivity: str = "Medium"
     ignored_vendors: list[str] = field(default_factory=list)
     safe_mode_cleanup: bool = True
+    quarantine_folder: str = ""
 
     # Migration / Machine Settings
     machine_display_name: str = ""
@@ -143,6 +153,7 @@ class AppSettings:
 
         return cls(
             # Studio
+            user_full_name=raw.get(KEY_USER_FULL_NAME, ""),
             preferred_daw=raw.get(KEY_PREFERRED_DAW, ""),
             preferred_formats=_load_json_list(
                 raw.get(KEY_PREFERRED_FORMATS, ""), default=["VST3", "AU"]
@@ -169,6 +180,7 @@ class AppSettings:
             legacy_vst2_sensitivity=raw.get(KEY_LEGACY_VST2_SENS, "Medium"),
             ignored_vendors=_load_json_list(raw.get(KEY_IGNORED_VENDORS, ""), default=[]),
             safe_mode_cleanup=raw.get(KEY_SAFE_MODE_CLEANUP, "true").lower() == "true",
+            quarantine_folder=raw.get(KEY_QUARANTINE_FOLDER, "").strip(),
 
             # Migration
             machine_display_name=raw.get(KEY_MACHINE_DISPLAY_NAME, ""),
@@ -191,6 +203,7 @@ class AppSettings:
         repo.set_many(
             {
                 # Studio
+                KEY_USER_FULL_NAME:       self.user_full_name,
                 KEY_PREFERRED_DAW:        self.preferred_daw,
                 KEY_PREFERRED_FORMATS:    json.dumps(self.preferred_formats),
                 KEY_MACHINE_ROLE:         self.machine_role,
@@ -209,6 +222,7 @@ class AppSettings:
                 KEY_LEGACY_VST2_SENS:     self.legacy_vst2_sensitivity,
                 KEY_IGNORED_VENDORS:      json.dumps(self.ignored_vendors),
                 KEY_SAFE_MODE_CLEANUP:    _bool_str(self.safe_mode_cleanup),
+                KEY_QUARANTINE_FOLDER:    self.quarantine_folder,
 
                 # Migration
                 KEY_MACHINE_DISPLAY_NAME: self.machine_display_name,

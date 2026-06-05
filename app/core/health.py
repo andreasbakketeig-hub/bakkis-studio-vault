@@ -112,7 +112,7 @@ def analyze_health(
                 category=CAT_BROKEN,
                 fmt=p.fmt,
                 path=p.path,
-                suggested_action="Remove broken symlink or reinstall plugin",
+                suggested_action="Review broken symlink — reinstall plugin if needed",
             ))
             continue  # no further checks are meaningful for this path
 
@@ -187,7 +187,10 @@ def analyze_health(
                         category=CAT_WARNING,
                         fmt=p.fmt,
                         path=p.path,
-                        suggested_action="VST3/AU equivalent found — safe to remove VST2 copy",
+                        suggested_action=(
+                            "VST3/AU equivalent found — review whether the VST2 "
+                            "copy is still needed"
+                        ),
                     ))
             elif vst2_sensitivity == "High":
                 # Flag all VST2 as broken regardless of alternatives
@@ -231,7 +234,10 @@ def analyze_health(
                             category=CAT_DUPLICATE,
                             fmt=p.fmt,
                             path=p.path,
-                            suggested_action="Remove one copy to avoid DAW loading conflicts",
+                            suggested_action=(
+                                "Multiple copies found — review which path to keep "
+                                "to avoid DAW loading conflicts"
+                            ),
                         ))
 
         # Same name but different formats (informational duplicate)
@@ -245,7 +251,10 @@ def analyze_health(
                         category=CAT_DUPLICATE,
                         fmt=p.fmt,
                         path=p.path,
-                        suggested_action="Same plugin name across multiple formats — keep preferred version",
+                        suggested_action=(
+                            "Same plugin name across multiple formats — review "
+                            "which format you want to keep"
+                        ),
                     ))
 
     return report

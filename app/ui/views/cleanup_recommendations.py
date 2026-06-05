@@ -1,13 +1,14 @@
 """
-Cleanup Recommendations view — surfaces safe format-cleanup suggestions
-without deleting or quarantining any files.
+Cleanup Recommendations view — format-redundancy suggestions with optional
+single-file quarantine after explicit confirmation.
 """
 
 from __future__ import annotations
 
 import subprocess
 import tkinter as tk
-from tkinter import ttk
+from tkinter import messagebox, ttk
+from typing import Callable, Optional
 
 import customtkinter as ctk
 
@@ -16,6 +17,7 @@ from app.core.cleanup import (
     CONF_SAFE,
     CONF_UNKNOWN,
     DAW_PROFILES,
+    PREFERRED_DAW_PROFILE as _DAW_PROFILE_MAP,
     PROFILE_ABLETON,
     PROFILE_CUBASE,
     PROFILE_LOGIC,
@@ -23,25 +25,32 @@ from app.core.cleanup import (
     PROFILE_CUSTOM,
     CleanupRecommendation,
     DawProfile,
+    RedundantFormatPath,
     analyze_cleanup,
+    can_offer_cleanup_quarantine,
+    cleanup_quarantine_block_reason,
+    cleanup_quarantine_reason,
     get_profile,
     make_custom_profile,
+    redundant_format_paths,
+    requires_format_picker,
+)
+from app.core.quarantine import (
+    QuarantineDestinationMismatchError,
+    QuarantineError,
+    complete_quarantine_move,
+    get_quarantine_display_root,
+    is_path_quarantined,
+    preflight_quarantine_target,
+    register_pending_quarantine,
+    sync_quarantine_root_from_settings,
 )
 from app.core.scanner import Plugin, _fmt_size
-
-# ── DAW → profile key mapping ─────────────────────────────────────────────────
-_DAW_PROFILE_MAP: dict[str, str] = {
-    "Logic Pro":     PROFILE_LOGIC,
-    "GarageBand":    PROFILE_LOGIC,
-    "Pro Tools":     PROFILE_PRO_TOOLS,
-    "Cubase":        PROFILE_CUBASE,
-    "Studio One":    PROFILE_CUBASE,
-    "Ableton Live":  PROFILE_ABLETON,
-    "FL Studio":     PROFILE_ABLETON,
-    "Bitwig Studio": PROFILE_ABLETON,
-    "Reaper":        PROFILE_ABLETON,
-    "Reason":        PROFILE_ABLETON,
-}
+from app.ui.dialogs.cleanup_format_picker import CleanupFormatPickerDialog
+from app.ui.dialogs.quarantine_confirm import (
+    QuarantineConfirmDialog,
+    QuarantineConfirmTarget,
+)
 
 # ── Design System ─────────────────────────────────────────────────────────────
 BG_CARD          = "#131720"
@@ -97,14 +106,22 @@ _ROW_HEADER  = 0
 _ROW_PROFILE = 1
 _ROW_STATS   = 2
 _ROW_FILTERS = 3
-_ROW_TABLE   = 4
-_ROW_STATUS  = 5
+_ROW_HELPER  = 4
+_ROW_TABLE   = 5
+_ROW_STATUS  = 6
 
 
 class CleanupRecommendationsView(ctk.CTkFrame):
     """Cleanup Recommendations — read-only analysis of plugin format redundancy."""
 
-    def __init__(self, parent: ctk.CTkFrame, settings=None, **kwargs):
+    def __init__(
+        self,
+        parent: ctk.CTkFrame,
+        settings=None,
+        on_quarantine_complete: Optional[Callable[[], None]] = None,
+        scan_paths: list[str] | None = None,
+        **kwargs,
+    ):
         super().__init__(parent, fg_color="transparent", **kwargs)
 
         self._plugins: list[Plugin] = []
@@ -113,6 +130,10 @@ class CleanupRecommendationsView(ctk.CTkFrame):
         self._filter_btns: dict[str, ctk.CTkButton] = {}
         self._profile_btns: dict[str, ctk.CTkButton] = {}
         self._iid_to_rec: dict[str, CleanupRecommendation] = {}
+        self._selected_quarantine_path: str | None = None
+        self._on_quarantine_complete = on_quarantine_complete
+        self._scan_paths: list[str] = list(scan_paths or [])
+        self._settings = settings
 
         # ── Derive initial state from settings ────────────────────────────────
         self._safe_mode: bool = settings.safe_mode_cleanup if settings else True
@@ -145,6 +166,7 @@ class CleanupRecommendationsView(ctk.CTkFrame):
         self._build_profile_bar()
         self._build_stats_row()
         self._build_filter_bar()
+        self._build_helper_note()
         self._build_table()
         self._build_statusbar()
         self._show_empty_state(initial=True)
@@ -163,7 +185,7 @@ class CleanupRecommendationsView(ctk.CTkFrame):
 
         ctk.CTkLabel(
             header,
-            text="Safe format-redundancy suggestions  ·  No files are deleted",
+            text="Format-redundancy suggestions  ·  No permanent delete or bulk actions",
             font=ctk.CTkFont(size=12),
             text_color=TEXT_MUTED,
         ).grid(row=1, column=0, sticky="w", pady=(3, 0))
@@ -270,9 +292,10 @@ class CleanupRecommendationsView(ctk.CTkFrame):
         for i in range(4):
             row.grid_columnconfigure(i, weight=1, uniform="cstat")
 
+        safe_label = "NEEDS REVIEW" if self._safe_mode else "SAFE TO REMOVE"
         self._stat_analyzed = self._make_stat_card(row, 0, "PRODUCTS ANALYZED",     "—", ACCENT)
         self._stat_flagged  = self._make_stat_card(row, 1, "FORMATS FLAGGED",        "—", ACCENT_WARN)
-        self._stat_safe     = self._make_stat_card(row, 2, "SAFE TO REMOVE",         "—", ACCENT_SAFE)
+        self._stat_safe     = self._make_stat_card(row, 2, safe_label,               "—", ACCENT_SAFE)
         self._stat_space    = self._make_stat_card(row, 3, "EST. RECOVERABLE SPACE", "—", ACCENT_GREEN)
 
     def _make_stat_card(
@@ -327,6 +350,21 @@ class CleanupRecommendationsView(ctk.CTkFrame):
             )
             btn.pack(side="left", padx=(0, 8))
             self._filter_btns[key] = btn
+
+    def _build_helper_note(self) -> None:
+        note = ctk.CTkFrame(self, fg_color=BG_CARD_INNER, corner_radius=8)
+        note.grid(row=_ROW_HELPER, column=0, sticky="ew", padx=30, pady=(10, 0))
+        ctk.CTkLabel(
+            note,
+            text=(
+                "Recommendations are read-only. Quarantine moves one selected "
+                "plug-in file only after confirmation."
+            ),
+            font=ctk.CTkFont(size=11),
+            text_color=TEXT_SECONDARY,
+            anchor="w",
+            wraplength=900,
+        ).pack(fill="x", padx=14, pady=10)
 
     def _build_table(self) -> None:
         container = ctk.CTkFrame(
@@ -420,7 +458,17 @@ class CleanupRecommendationsView(ctk.CTkFrame):
             bar, text="",
             font=ctk.CTkFont(size=11), text_color=TEXT_MUTED, anchor="w",
         )
-        self._status_label.grid(row=0, column=0, sticky="w")
+        self._status_label.grid(row=0, column=0, sticky="w", rowspan=2)
+
+        self._quarantine_help = ctk.CTkLabel(
+            bar,
+            text="",
+            font=ctk.CTkFont(size=10),
+            text_color=ACCENT_WARN,
+            anchor="w",
+            wraplength=520,
+        )
+        self._quarantine_help.grid(row=1, column=0, sticky="w", pady=(4, 0))
 
         self._reveal_btn = ctk.CTkButton(
             bar,
@@ -437,7 +485,24 @@ class CleanupRecommendationsView(ctk.CTkFrame):
             command=self._reveal_in_finder,
             state="disabled",
         )
-        self._reveal_btn.grid(row=0, column=1, sticky="e")
+        self._reveal_btn.grid(row=0, column=1, sticky="e", padx=(0, 8))
+
+        self._quarantine_btn = ctk.CTkButton(
+            bar,
+            text="▣  Quarantine…",
+            width=140,
+            height=34,
+            corner_radius=9,
+            font=ctk.CTkFont(size=12),
+            fg_color=ACCENT,
+            hover_color=ACCENT_HOVER,
+            text_color=TEXT_MUTED,
+            border_width=1,
+            border_color=BORDER,
+            command=self._quarantine_selected,
+            state="disabled",
+        )
+        self._quarantine_btn.grid(row=0, column=2, sticky="e")
 
     # ── Public API ────────────────────────────────────────────────────────────
 
@@ -592,7 +657,8 @@ class CleanupRecommendationsView(ctk.CTkFrame):
         for iid in self._tree.get_children():
             self._tree.delete(iid)
         self._iid_to_rec.clear()
-        self._reveal_btn.configure(state="disabled", text_color=TEXT_MUTED)
+        self._selected_quarantine_path = None
+        self._update_action_buttons(None)
 
         if not self._recs:
             self._show_empty_state(initial=True)
@@ -654,11 +720,190 @@ class CleanupRecommendationsView(ctk.CTkFrame):
             )
 
     def _on_select(self, _event=None) -> None:
-        has_sel = bool(self._tree.selection())
+        selected = self._tree.selection()
+        rec = self._iid_to_rec.get(selected[0]) if selected else None
+        self._selected_quarantine_path = None
+        if rec:
+            paths = redundant_format_paths(rec)
+            if len(paths) == 1 and rec.confidence != CONF_UNKNOWN:
+                self._selected_quarantine_path = paths[0].path
+        self._update_action_buttons(rec)
+
+    def _update_action_buttons(self, rec: CleanupRecommendation | None) -> None:
+        has_sel = rec is not None
         self._reveal_btn.configure(
             state="normal" if has_sel else "disabled",
             text_color=TEXT_PRIMARY if has_sel else TEXT_MUTED,
         )
+        can_q = False
+        help_text = ""
+        if rec:
+            scan = self._scan_paths or None
+            can_q = can_offer_cleanup_quarantine(
+                rec,
+                scan_paths=scan,
+                path_quarantined_check=is_path_quarantined,
+            )
+            if not can_q:
+                help_text = cleanup_quarantine_block_reason(
+                    rec, scan_paths=scan,
+                )
+        self._quarantine_btn.configure(
+            state="normal" if can_q else "disabled",
+            text_color=TEXT_PRIMARY if can_q else TEXT_MUTED,
+        )
+        self._quarantine_help.configure(text=help_text)
+
+    def _selected_rec(self) -> CleanupRecommendation | None:
+        selected = self._tree.selection()
+        if not selected:
+            return None
+        return self._iid_to_rec.get(selected[0])
+
+    def _quarantine_selected(self) -> None:
+        rec = self._selected_rec()
+        if not rec:
+            return
+        if requires_format_picker(rec) and not self._selected_quarantine_path:
+            root = self.winfo_toplevel()
+            CleanupFormatPickerDialog(
+                root,
+                rec,
+                self._on_format_picked,
+                path_quarantined_check=is_path_quarantined,
+                scan_paths=self._scan_paths or None,
+            )
+            return
+        paths = [
+            p for p in redundant_format_paths(rec)
+            if preflight_quarantine_target(
+                p.path, scan_paths=self._scan_paths or None,
+            ).can_offer_in_ui
+        ]
+        if len(paths) == 1 and not requires_format_picker(rec):
+            self._selected_quarantine_path = paths[0].path
+        if not self._selected_quarantine_path:
+            return
+        self._open_quarantine_confirm(rec)
+
+    def _on_format_picked(self, item: RedundantFormatPath) -> None:
+        self._selected_quarantine_path = item.path
+        rec = self._selected_rec()
+        self._update_action_buttons(rec)
+        if rec:
+            self._open_quarantine_confirm(rec, item)
+
+    def _open_quarantine_confirm(
+        self,
+        rec: CleanupRecommendation,
+        item: RedundantFormatPath | None = None,
+    ) -> None:
+        if item is None:
+            for p in redundant_format_paths(rec):
+                if p.path == self._selected_quarantine_path:
+                    item = p
+                    break
+        if item is None:
+            return
+
+        pf = preflight_quarantine_target(
+            item.path, scan_paths=self._scan_paths or None,
+        )
+        if not pf.can_offer_in_ui:
+            messagebox.showerror("Quarantine unavailable", pf.message)
+            return
+
+        profile = self._active_profile()
+        extra: list[tuple[str, str]] = [
+            ("Confidence", rec.confidence),
+            ("DAW profile", profile.name),
+        ]
+        if rec.confidence == CONF_REVIEW:
+            extra.append((
+                "Risk",
+                "Review carefully — this format may still be needed in some workflows.",
+            ))
+        if self._safe_mode:
+            extra.append((
+                "Safe Mode",
+                "Enabled — recommendations are not labeled as safe to remove.",
+            ))
+
+        target = QuarantineConfirmTarget(
+            path=item.path,
+            plugin_name=rec.product_name,
+            developer=rec.developer or item.plugin.developer,
+            fmt=item.fmt,
+            issue_type="Redundant format (Cleanup)",
+            recommendation=cleanup_quarantine_reason(rec, item.fmt),
+            extra_fields=tuple(extra),
+        )
+        qroot = sync_quarantine_root_from_settings(self._settings)
+        root = self.winfo_toplevel()
+        QuarantineConfirmDialog(
+            root,
+            target,
+            self._execute_quarantine,
+            scan_paths=self._scan_paths or None,
+            quarantine_root=qroot,
+            display_quarantine_root=get_quarantine_display_root(self._settings),
+        )
+
+    def _execute_quarantine(
+        self,
+        path: str,
+        reason: str,
+        operation_id: str,
+        expected_dest: str,
+        system_ack: bool,
+    ) -> None:
+        rec = self._selected_rec()
+        meta = {
+            "plugin_name": rec.product_name if rec else "",
+            "developer": (rec.developer if rec else "") or "",
+            "fmt": "",
+            "issue_kind": "cleanup_redundant_format",
+        }
+        if rec and self._selected_quarantine_path:
+            for p in redundant_format_paths(rec):
+                if p.path == self._selected_quarantine_path:
+                    meta["fmt"] = p.fmt
+                    break
+        qroot = sync_quarantine_root_from_settings(self._settings)
+        try:
+            register_pending_quarantine(
+                path,
+                reason,
+                operation_id,
+                expected_dest,
+                metadata=meta,
+                root=qroot,
+                scan_paths=self._scan_paths or None,
+                system_path_acknowledged=system_ack,
+            )
+            result = complete_quarantine_move(
+                operation_id,
+                expected_dest,
+                root=qroot,
+                scan_paths=self._scan_paths or None,
+            )
+            msg = (
+                f"Moved to quarantine:\n{result.operation.quarantine_path}\n\n"
+                "Plug-in scan will refresh recommendations."
+            )
+            if result.warnings:
+                msg += "\n\nWarnings:\n" + "\n".join(result.warnings)
+            messagebox.showinfo("Quarantine complete", msg)
+            self._selected_quarantine_path = None
+            if self._on_quarantine_complete:
+                self._on_quarantine_complete()
+        except QuarantineDestinationMismatchError as exc:
+            messagebox.showerror(
+                "Destination changed",
+                f"{exc}\n\nPlease open Quarantine again and confirm.",
+            )
+        except QuarantineError as exc:
+            messagebox.showerror("Quarantine failed", str(exc))
 
     def _reveal_in_finder(self) -> None:
         selected = self._tree.selection()

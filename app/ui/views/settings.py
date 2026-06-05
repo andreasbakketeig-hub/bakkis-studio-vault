@@ -13,6 +13,8 @@ from typing import TYPE_CHECKING
 
 import customtkinter as ctk
 
+from pathlib import Path
+
 from app.core.settings import (
     ALL_FORMATS,
     DAW_OPTIONS,
@@ -22,6 +24,8 @@ from app.core.settings import (
     VST2_SENSITIVITIES,
     THEME_PRESETS,
     AppSettings,
+    DEFAULT_QUARANTINE_FOLDER,
+    KEY_USER_FULL_NAME,
 )
 from app.db.database import DEFAULT_DB_PATH
 
@@ -104,6 +108,7 @@ class SettingsView(ctk.CTkFrame):
         s = self._settings
 
         # Studio
+        self._full_name_var    = tk.StringVar(value=s.user_full_name)
         self._daw_var          = tk.StringVar(value=s.preferred_daw or "Select DAW…")
         self._format_vars: dict[str, tk.BooleanVar] = {
             fmt: tk.BooleanVar(value=fmt in s.preferred_formats)
@@ -123,6 +128,9 @@ class SettingsView(ctk.CTkFrame):
         self._safe_mode_var      = tk.BooleanVar(value=s.safe_mode_cleanup)
         self._vst2_sens_var      = tk.StringVar(value=s.legacy_vst2_sensitivity)
         self._ignored_vendors: list[str] = list(s.ignored_vendors)
+        self._quarantine_var = tk.StringVar(
+            value=s.quarantine_folder or DEFAULT_QUARANTINE_FOLDER
+        )
 
         # Migration
         self._machine_name_var  = tk.StringVar(value=s.machine_display_name)
@@ -251,6 +259,49 @@ class SettingsView(ctk.CTkFrame):
     # ── Tab: Studio ───────────────────────────────────────────────────────────
 
     def _build_studio_tab(self, parent: ctk.CTkScrollableFrame) -> None:
+        import getpass
+
+        card0 = self._card(parent, "Your Name")
+
+        ctk.CTkLabel(
+            card0,
+            text="Shown in the welcome message on the Studio Overview dashboard",
+            font=ctk.CTkFont(size=12),
+            text_color=TEXT_MUTED,
+        ).pack(anchor="w", padx=16, pady=(0, 12))
+
+        name_row = ctk.CTkFrame(card0, fg_color="transparent")
+        name_row.pack(fill="x", padx=16, pady=(0, 16))
+        name_row.grid_columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(
+            name_row, text="Full name",
+            font=ctk.CTkFont(size=13), text_color=TEXT_PRIMARY,
+        ).grid(row=0, column=0, sticky="w", padx=(0, 16))
+
+        try:
+            _placeholder = getpass.getuser().replace(".", " ").replace("_", " ").title()
+        except Exception:
+            _placeholder = "Your name…"
+
+        ctk.CTkEntry(
+            name_row,
+            textvariable=self._full_name_var,
+            placeholder_text=_placeholder,
+            height=36,
+            fg_color=BG_INNER,
+            text_color=TEXT_PRIMARY,
+            border_color=BORDER,
+            font=ctk.CTkFont(size=13),
+        ).grid(row=0, column=1, sticky="ew")
+
+        ctk.CTkLabel(
+            card0,
+            text="Leave blank to use your macOS username as the default.",
+            font=ctk.CTkFont(size=11),
+            text_color=TEXT_MUTED,
+        ).pack(anchor="w", padx=16, pady=(0, 16))
+
         card = self._card(parent, "Primary DAW")
 
         daw_row = ctk.CTkFrame(card, fg_color="transparent")
@@ -456,6 +507,73 @@ class SettingsView(ctk.CTkFrame):
 
     # ── Tab: Cleanup ──────────────────────────────────────────────────────────
 
+    def _build_quarantine_folder_card(self, parent: ctk.CTkScrollableFrame) -> None:
+        from app.core.quarantine import (
+            DEFAULT_QUARANTINE_ROOT,
+            QUARANTINE_FOLDER_CHANGE_WARNING,
+            _manifest_path,
+        )
+
+        card = self._card(parent, "Cleanup / Quarantine")
+
+        ctk.CTkLabel(
+            card,
+            text="Folder where quarantined plug-ins are stored",
+            font=ctk.CTkFont(size=12),
+            text_color=TEXT_MUTED,
+        ).pack(anchor="w", padx=16, pady=(0, 8))
+
+        path_row = ctk.CTkFrame(card, fg_color=BG_INNER, corner_radius=8)
+        path_row.pack(fill="x", padx=16, pady=(0, 8))
+        path_row.grid_columnconfigure(0, weight=1)
+
+        self._quarantine_path_label = ctk.CTkLabel(
+            path_row,
+            text=self._quarantine_var.get() or DEFAULT_QUARANTINE_FOLDER,
+            font=ctk.CTkFont(size=11),
+            text_color=TEXT_PRIMARY,
+            anchor="w",
+            wraplength=520,
+            justify="left",
+        )
+        self._quarantine_path_label.grid(row=0, column=0, sticky="ew", padx=12, pady=10)
+
+        btn_row = ctk.CTkFrame(card, fg_color="transparent")
+        btn_row.pack(fill="x", padx=16, pady=(0, 8))
+
+        for text, cmd, width in (
+            ("Browse…", self._pick_quarantine_folder, 100),
+            ("Open Folder", self._open_quarantine_folder, 110),
+            ("Reset to Default", self._reset_quarantine_folder, 140),
+        ):
+            ctk.CTkButton(
+                btn_row,
+                text=text,
+                width=width,
+                height=32,
+                fg_color=BG_PILL,
+                hover_color=BORDER_BRIGHT,
+                command=cmd,
+            ).pack(side="left", padx=(0, 8))
+
+        hints: list[str] = [QUARANTINE_FOLDER_CHANGE_WARNING]
+        default_manifest = _manifest_path(DEFAULT_QUARANTINE_ROOT)
+        current = Path(self._quarantine_var.get() or DEFAULT_QUARANTINE_FOLDER).expanduser()
+        if default_manifest.exists() and current != DEFAULT_QUARANTINE_ROOT.resolve():
+            hints.append(
+                f"Existing quarantined items may still be in:\n{DEFAULT_QUARANTINE_ROOT}"
+            )
+
+        ctk.CTkLabel(
+            card,
+            text="\n\n".join(hints),
+            font=ctk.CTkFont(size=11),
+            text_color=TEXT_MUTED,
+            anchor="w",
+            wraplength=560,
+            justify="left",
+        ).pack(anchor="w", padx=16, pady=(0, 16))
+
     def _build_cleanup_tab(self, parent: ctk.CTkScrollableFrame) -> None:
         card = self._card(parent, "Safety Rules")
 
@@ -479,6 +597,8 @@ class SettingsView(ctk.CTkFrame):
             text="These rules apply globally to Cleanup Recommendations and Migration modules.",
             font=ctk.CTkFont(size=11), text_color=TEXT_MUTED,
         ).pack(anchor="w", padx=16, pady=(0, 16))
+
+        self._build_quarantine_folder_card(parent)
 
         # VST2 sensitivity
         card2 = self._card(parent, "Legacy VST2 Warning Sensitivity")
@@ -934,6 +1054,7 @@ class SettingsView(ctk.CTkFrame):
         s = self._settings
 
         # Studio
+        s.user_full_name     = self._full_name_var.get().strip()
         daw = self._daw_var.get()
         s.preferred_daw      = "" if daw == "Select DAW…" else daw
         s.preferred_formats  = [f for f, v in self._format_vars.items() if v.get()]
@@ -954,6 +1075,11 @@ class SettingsView(ctk.CTkFrame):
         s.safe_mode_cleanup        = self._safe_mode_var.get()
         s.legacy_vst2_sensitivity  = self._vst2_sens_var.get()
         s.ignored_vendors          = list(self._ignored_vendors)
+        folder = self._quarantine_var.get().strip()
+        if folder == DEFAULT_QUARANTINE_FOLDER:
+            s.quarantine_folder = ""
+        else:
+            s.quarantine_folder = folder
 
         # Migration
         s.machine_display_name           = self._machine_name_var.get().strip()
@@ -967,6 +1093,9 @@ class SettingsView(ctk.CTkFrame):
         s.dashboard_density  = self._dashboard_density_var.get()
         s.accent_color       = self._accent_color_var.get()
         s.theme_preset       = self._theme_preset_var.get()
+
+        if not self._validate_quarantine_folder_for_save(s):
+            return
 
         s.save(self._settings_repo)
 
@@ -988,6 +1117,7 @@ class SettingsView(ctk.CTkFrame):
 
         d = AppSettings()
 
+        self._full_name_var.set(d.user_full_name)
         self._daw_var.set(d.preferred_daw or "Select DAW…")
         for fmt, var in self._format_vars.items():
             var.set(fmt in d.preferred_formats)
@@ -1004,6 +1134,10 @@ class SettingsView(ctk.CTkFrame):
         self._vst2_sens_var.set(d.legacy_vst2_sensitivity)
         self._ignored_vendors.clear()
         self._refresh_vendor_list()
+        self._quarantine_var.set(DEFAULT_QUARANTINE_FOLDER)
+        self._quarantine_path_label.configure(
+            text=DEFAULT_QUARANTINE_FOLDER, text_color=TEXT_PRIMARY,
+        )
 
         self._machine_name_var.set(d.machine_display_name)
         self._snapshot_var.set(d.snapshot_export_folder)
@@ -1125,6 +1259,62 @@ class SettingsView(ctk.CTkFrame):
         if name in self._ignored_vendors:
             self._ignored_vendors.remove(name)
         self._refresh_vendor_list()
+
+    # ── Quarantine folder ───────────────────────────────────────────────────
+
+    def _pick_quarantine_folder(self) -> None:
+        folder = filedialog.askdirectory(title="Select Quarantine Folder")
+        if folder:
+            self._quarantine_var.set(folder)
+            self._quarantine_path_label.configure(text=folder, text_color=TEXT_PRIMARY)
+
+    def _open_quarantine_folder(self) -> None:
+        import subprocess
+        from app.core.quarantine import get_quarantine_root
+
+        folder = self._quarantine_var.get().strip() or DEFAULT_QUARANTINE_FOLDER
+        path = get_quarantine_root(folder)
+        path.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["open", str(path)], check=False)
+
+    def _reset_quarantine_folder(self) -> None:
+        self._quarantine_var.set(DEFAULT_QUARANTINE_FOLDER)
+        self._quarantine_path_label.configure(
+            text=DEFAULT_QUARANTINE_FOLDER,
+            text_color=TEXT_PRIMARY,
+        )
+
+    def _validate_quarantine_folder_for_save(self, settings: AppSettings) -> bool:
+        from app.core.quarantine import (
+            QuarantineError,
+            ensure_quarantine_folder,
+            validate_quarantine_folder,
+        )
+
+        folder = settings.quarantine_folder.strip() or DEFAULT_QUARANTINE_FOLDER
+        v = validate_quarantine_folder(
+            folder,
+            scan_paths=settings.plugin_scan_paths,
+        )
+        if not v.ok:
+            messagebox.showerror("Invalid quarantine folder", v.message)
+            return False
+
+        resolved = Path(folder).expanduser()
+        if not resolved.exists():
+            if not messagebox.askyesno(
+                "Create quarantine folder",
+                f"Create this quarantine folder?\n\n{folder}",
+            ):
+                return False
+            try:
+                ensure_quarantine_folder(
+                    folder, scan_paths=settings.plugin_scan_paths,
+                )
+            except QuarantineError as exc:
+                messagebox.showerror("Invalid quarantine folder", str(exc))
+                return False
+        return True
 
     # ── Snapshot folder ───────────────────────────────────────────────────────
 

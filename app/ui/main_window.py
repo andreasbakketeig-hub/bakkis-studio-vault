@@ -13,16 +13,20 @@ from app.db.repositories.plugins import PluginRepository
 from app.db.repositories.music_apps import MusicAppRepository
 from app.db.repositories.settings import SettingsRepository
 from app.core.settings import AppSettings
+from app.core.quarantine import apply_quarantine_settings
 from app.ui.sidebar import Sidebar
 from app.ui.views.studio_overview import StudioOverviewView
 from app.ui.views.plugin_scanner import PluginScannerView
 from app.ui.views.format_analysis import FormatAnalysisView
 from app.ui.views.plugin_health import PluginHealthView
+from app.ui.views.quarantined_items import QuarantinedItemsView
 from app.ui.views.cleanup_recommendations import CleanupRecommendationsView
 from app.ui.views.music_software_scanner import MusicSoftwareScannerView
 from app.ui.views.migration_assistant import MigrationAssistantView
 from app.ui.views.settings import SettingsView
 from app.ui.views.coming_soon import ComingSoonView
+from app.ui.views.hardware_inventory import HardwareInventoryView
+from app.core.hardware_scanner import HardwareDevice
 
 BG_MAIN = "#0D0F18"
 BG_CONTENT = "#10131C"
@@ -89,6 +93,7 @@ class MainWindow(ctk.CTk):
         self._apps_repo       = MusicAppRepository(self._db)
         self._settings_repo   = SettingsRepository(self._db)
         self._app_settings    = AppSettings.load(self._settings_repo)
+        apply_quarantine_settings(self._app_settings)
 
         # Apply theme preset from persisted settings immediately
         self._apply_theme_colors()
@@ -96,7 +101,9 @@ class MainWindow(ctk.CTk):
         # ── Load cached scan data ─────────────────────────────────────────────
         self._views: dict[str, ctk.CTkFrame] = {}
         self._active_key: str = ""
+        self._plugin_scan_in_progress: bool = False
 
+        self._hardware_devices: list[HardwareDevice] = []
         if self._app_settings.auto_load_cache:
             self._plugins, self._plugin_scan_ts = self._plugin_repo.load_latest()
             self._music_apps, self._apps_scan_ts = self._apps_repo.load_latest()
@@ -160,16 +167,77 @@ class MainWindow(ctk.CTk):
         if hasattr(view, "refresh_db_stats"):
             view.refresh_db_stats()
 
+        if key == "quarantine" and hasattr(view, "refresh"):
+            view.refresh()  # type: ignore[union-attr]
+
+        if key == "studio_overview" and hasattr(view, "update_settings"):
+            self._app_settings = AppSettings.load(self._settings_repo)
+            view.update_settings(self._app_settings)
+
     # ── Scan callbacks ────────────────────────────────────────────────────────
+
+    def scan_all_plugins(self, *, navigate: bool = False) -> None:
+        """Shared entry point for Studio Overview Rescan All and Plugin Scanner."""
+        if self._plugin_scan_in_progress:
+            return
+
+        if navigate:
+            if self._active_key != "plugins":
+                self._navigate("plugins")
+        elif "plugins" not in self._views:
+            self._views["plugins"] = self._create_view("plugins")
+
+        scanner = self._views.get("plugins")
+        if scanner is None or not hasattr(scanner, "begin_scan"):
+            return
+
+        self._plugin_scan_in_progress = True
+        self._notify_plugin_scan_status("Scanning plugins…", scanning=True)
+        if not scanner.begin_scan():  # type: ignore[union-attr]
+            self._plugin_scan_in_progress = False
+            self._notify_plugin_scan_status("Scan already in progress", scanning=False)
+
+    def _notify_plugin_scan_status(self, message: str, *, scanning: bool) -> None:
+        overview = self._views.get("studio_overview")
+        if overview is not None and hasattr(overview, "set_scan_status"):
+            overview.set_scan_status(message, scanning=scanning)  # type: ignore[union-attr]
+
+    def _on_plugin_scan_progress(self, message: str) -> None:
+        if self._plugin_scan_in_progress:
+            self._notify_plugin_scan_status(message, scanning=True)
+
+    def _on_plugin_scan_failed(self, error: str) -> None:
+        self._plugin_scan_in_progress = False
+        self._notify_plugin_scan_status(f"Scan failed: {error}", scanning=False)
+
+    def _plugin_scan_paths(self) -> list[str]:
+        paths = self._app_settings.plugin_scan_paths
+        return list(paths) if paths else []
+
+    def _refresh_quarantine_view(self) -> None:
+        view = self._views.get("quarantine")
+        if view is not None and hasattr(view, "refresh"):
+            view.refresh()  # type: ignore[union-attr]
+
+    def _on_cleanup_quarantine_complete(self) -> None:
+        """Rescan and refresh all plugin-dependent views after cleanup quarantine."""
+        self._refresh_quarantine_view()
+        self.scan_all_plugins(navigate=False)
 
     def _on_plugins_ready(self, plugins: list[Plugin]) -> None:
         """Called by PluginScannerView when a scan completes."""
         self._plugins = plugins
         self._plugin_repo.save_scan(plugins)
+        self._plugin_scan_in_progress = False
+        self._notify_plugin_scan_status("Scan complete", scanning=False)
 
-        for key in ("studio_overview", "format_analysis", "plugin_health", "cleanup", "migration"):
+        for key in ("studio_overview", "format_analysis", "cleanup", "migration"):
             if key in self._views:
                 self._views[key].refresh(plugins)  # type: ignore[union-attr]
+
+        health = self._views.get("plugin_health")
+        if health is not None and hasattr(health, "refresh"):
+            health.refresh(plugins, self._music_apps)  # type: ignore[union-attr]
 
         if "settings" in self._views:
             self._views["settings"].refresh_db_stats()  # type: ignore[union-attr]
@@ -182,8 +250,19 @@ class MainWindow(ctk.CTk):
         if "studio_overview" in self._views:
             self._views["studio_overview"].refresh_apps(apps)  # type: ignore[union-attr]
 
+        health = self._views.get("plugin_health")
+        if health is not None and self._plugins and hasattr(health, "refresh"):
+            health.refresh(self._plugins, apps)  # type: ignore[union-attr]
+
         if "settings" in self._views:
             self._views["settings"].refresh_db_stats()  # type: ignore[union-attr]
+
+    def _on_hardware_ready(self, devices: list[HardwareDevice]) -> None:
+        """Called by HardwareInventoryView when a hardware scan completes."""
+        self._hardware_devices = devices
+
+        if "studio_overview" in self._views:
+            self._views["studio_overview"].refresh_hardware(devices)  # type: ignore[union-attr]
 
     # ── View factory ──────────────────────────────────────────────────────────
 
@@ -194,20 +273,34 @@ class MainWindow(ctk.CTk):
                 view = StudioOverviewView(
                     self._content_area,
                     on_navigate=self._navigate,
+                    on_rescan_all=lambda: self.scan_all_plugins(navigate=True),
                     settings=s,
                 )
                 if self._plugins:
                     view.refresh(self._plugins)
                 if self._music_apps:
                     view.refresh_apps(self._music_apps)
+                if self._hardware_devices:
+                    view.refresh_hardware(self._hardware_devices)
+                return view
+
+            case "hardware":
+                view = HardwareInventoryView(
+                    self._content_area,
+                    on_hardware_ready=self._on_hardware_ready,
+                )
                 return view
 
             case "plugins":
                 return PluginScannerView(
                     self._content_area,
                     on_plugins_ready=self._on_plugins_ready,
+                    on_request_scan=lambda: self.scan_all_plugins(navigate=False),
+                    on_scan_progress=self._on_plugin_scan_progress,
+                    on_scan_failed=self._on_plugin_scan_failed,
                     db=self._db,
                     last_scanned=self._plugin_scan_ts,
+                    scan_paths=self._plugin_scan_paths(),
                 )
 
             case "format_analysis":
@@ -217,13 +310,31 @@ class MainWindow(ctk.CTk):
                 return view
 
             case "plugin_health":
-                view = PluginHealthView(self._content_area, settings=s)
+                view = PluginHealthView(
+                    self._content_area,
+                    settings=s,
+                    on_request_rescan=lambda: self.scan_all_plugins(navigate=False),
+                    on_quarantine_complete=self._refresh_quarantine_view,
+                    scan_paths=self._plugin_scan_paths(),
+                )
                 if self._plugins:
-                    view.refresh(self._plugins)
+                    view.refresh(self._plugins, self._music_apps)
+                return view
+
+            case "quarantine":
+                view = QuarantinedItemsView(
+                    self._content_area,
+                    on_restore_complete=lambda: self.scan_all_plugins(navigate=False),
+                )
                 return view
 
             case "cleanup":
-                view = CleanupRecommendationsView(self._content_area, settings=s)
+                view = CleanupRecommendationsView(
+                    self._content_area,
+                    settings=s,
+                    on_quarantine_complete=self._on_cleanup_quarantine_complete,
+                    scan_paths=self._plugin_scan_paths(),
+                )
                 if self._plugins:
                     view.refresh(self._plugins)
                 return view
@@ -254,10 +365,11 @@ class MainWindow(ctk.CTk):
 
     # ── Settings saved callback ───────────────────────────────────────────────
 
-    def _on_settings_saved(self, _saved: AppSettings) -> None:
+    def _on_settings_saved(self, saved: AppSettings) -> None:
         """Called by SettingsView after the user saves. Propagates changes live."""
-        # Reload fresh settings from DB
-        self._app_settings = AppSettings.load(self._settings_repo)
+        # Prefer the saved in-memory object (just validated); reload keeps parity.
+        self._app_settings = saved
+        apply_quarantine_settings(self._app_settings)
 
         # Live accent: update sidebar indicator immediately
         self._sidebar.update_accent(self._app_settings.accent_color)
@@ -297,22 +409,18 @@ class MainWindow(ctk.CTk):
     def _trigger_auto_rescan(self) -> None:
         """Run a background scan if auto_rescan_on_launch is enabled."""
         import threading
-        from app.core.scanner import scan_plugins
         from app.core.music_software_scanner import scan_music_apps
 
-        def _scan() -> None:
-            try:
-                result = scan_plugins()
-                self.after(0, lambda r=result: self._on_plugins_ready(r.plugins))
-            except Exception:
-                pass
+        self.scan_all_plugins(navigate=False)
+
+        def _scan_apps() -> None:
             try:
                 apps = scan_music_apps()
                 self.after(0, lambda a=apps: self._on_apps_ready(a))
             except Exception:
                 pass
 
-        threading.Thread(target=_scan, daemon=True).start()
+        threading.Thread(target=_scan_apps, daemon=True).start()
 
     # ── Shutdown ──────────────────────────────────────────────────────────────
 

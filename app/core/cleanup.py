@@ -8,6 +8,7 @@ No files are deleted or quarantined by this module.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 from app.core.scanner import FormatGroup, Plugin, _fmt_size, analyze_formats
 
@@ -88,6 +89,19 @@ DAW_PROFILES: list[DawProfile] = [
 
 _PROFILE_BY_KEY: dict[str, DawProfile] = {p.key: p for p in DAW_PROFILES}
 
+PREFERRED_DAW_PROFILE: dict[str, str] = {
+    "Logic Pro":     PROFILE_LOGIC,
+    "GarageBand":    PROFILE_LOGIC,
+    "Pro Tools":     PROFILE_PRO_TOOLS,
+    "Cubase":        PROFILE_CUBASE,
+    "Studio One":    PROFILE_CUBASE,
+    "Ableton Live":  PROFILE_ABLETON,
+    "FL Studio":     PROFILE_ABLETON,
+    "Bitwig Studio": PROFILE_ABLETON,
+    "Reaper":        PROFILE_ABLETON,
+    "Reason":        PROFILE_ABLETON,
+}
+
 
 def get_profile(key: str) -> DawProfile:
     """Return the :class:`DawProfile` for *key*, defaulting to Ableton Live."""
@@ -146,6 +160,125 @@ class CleanupRecommendation:
     @property
     def is_high_disk_usage(self) -> bool:
         return self.recoverable_size >= HIGH_DISK_THRESHOLD
+
+
+@dataclass(frozen=True)
+class RedundantFormatPath:
+    """One redundant format copy with a resolved on-disk plug-in path."""
+
+    fmt: str
+    path: str
+    plugin: Plugin
+
+
+def redundant_format_paths(rec: CleanupRecommendation) -> list[RedundantFormatPath]:
+    """
+    Return redundant formats that map to existing plug-in bundle paths.
+
+    Order follows ``redundant_formats`` on the recommendation.
+    """
+    out: list[RedundantFormatPath] = []
+    for fmt in rec.redundant_formats:
+        plugin = rec.installed_formats.get(fmt)
+        if plugin is None:
+            continue
+        path = (plugin.path or "").strip()
+        if not path:
+            continue
+        try:
+            if not Path(path).expanduser().exists():
+                continue
+        except OSError:
+            continue
+        out.append(RedundantFormatPath(fmt=fmt, path=path, plugin=plugin))
+    return out
+
+
+def cleanup_quarantine_reason(rec: CleanupRecommendation, fmt: str) -> str:
+    """Human-readable reason shown in the quarantine confirmation dialog."""
+    keep = " · ".join(rec.keep_formats) if rec.keep_formats else "—"
+    return (
+        f"Redundant {fmt} format for {rec.product_name} "
+        f"(confidence: {rec.confidence}; keep: {keep})"
+    )
+
+
+def requires_format_picker(rec: CleanupRecommendation) -> bool:
+    """True when the user must pick exactly one redundant path before quarantine."""
+    paths = redundant_format_paths(rec)
+    if len(paths) > 1:
+        return True
+    return len(paths) == 1 and rec.confidence == CONF_UNKNOWN
+
+
+def can_offer_cleanup_quarantine(
+    rec: CleanupRecommendation,
+    *,
+    scan_paths: list[str] | None = None,
+    path_quarantined_check=None,
+    preflight_check=None,
+) -> bool:
+    """
+    True when Cleanup Recommendations may enable Quarantine for *rec*.
+
+    At least one redundant path must pass the preflight check. ``selected_path``
+    is not required to enable the button — the picker supplies it when needed.
+    """
+    if not rec.has_redundant:
+        return False
+
+    paths = redundant_format_paths(rec)
+    if not paths:
+        return False
+
+    check = path_quarantined_check
+    if check is None:
+        from app.core.quarantine import is_path_quarantined as check
+
+    available = [p for p in paths if not check(p.path)]
+    if not available:
+        return False
+
+    if preflight_check is None:
+        from app.core.quarantine import preflight_quarantine_target
+
+        def preflight_check(path: str) -> bool:
+            return preflight_quarantine_target(
+                path, scan_paths=scan_paths,
+            ).can_offer_in_ui
+
+    return any(preflight_check(p.path) for p in available)
+
+
+def cleanup_quarantine_block_reason(
+    rec: CleanupRecommendation,
+    *,
+    scan_paths: list[str] | None = None,
+    path_quarantined_check=None,
+) -> str:
+    """Return a user-facing reason when Quarantine cannot be offered."""
+    if not rec.has_redundant:
+        return "No redundant formats for this product."
+    paths = redundant_format_paths(rec)
+    if not paths:
+        return "No on-disk plug-in paths found for redundant formats."
+    from app.core.quarantine import (
+        is_path_quarantined,
+        preflight_quarantine_target,
+    )
+    check = path_quarantined_check or is_path_quarantined
+    available = [p for p in paths if not check(p.path)]
+    if not available:
+        return "All redundant copies are already in quarantine."
+    for p in available:
+        pf = preflight_quarantine_target(p.path, scan_paths=scan_paths)
+        if pf.can_offer_in_ui:
+            return ""
+        if pf.not_writable:
+            return pf.message
+        if pf.message:
+            return pf.message
+    return "Quarantine is not available for this selection."
 
 
 # ── Confidence engine ─────────────────────────────────────────────────────────
