@@ -26,6 +26,8 @@ from app.ui.views.migration_assistant import MigrationAssistantView
 from app.ui.views.settings import SettingsView
 from app.ui.views.coming_soon import ComingSoonView
 from app.ui.views.hardware_inventory import HardwareInventoryView
+from app.ui.views.license_vault import LicenseVaultView
+from app.ui.views.studio_snapshots import StudioSnapshotsView
 from app.core.hardware_scanner import HardwareDevice
 
 BG_MAIN = "#0D0F18"
@@ -235,9 +237,16 @@ class MainWindow(ctk.CTk):
             if key in self._views:
                 self._views[key].refresh(plugins)  # type: ignore[union-attr]
 
+        if "studio_snapshots" in self._views:
+            self._views["studio_snapshots"].refresh(plugins=plugins)  # type: ignore[union-attr]
+
         health = self._views.get("plugin_health")
         if health is not None and hasattr(health, "refresh"):
             health.refresh(plugins, self._music_apps)  # type: ignore[union-attr]
+
+        vault = self._views.get("licenses")
+        if vault is not None and hasattr(vault, "refresh"):
+            vault.refresh(plugins=plugins)  # type: ignore[union-attr]
 
         if "settings" in self._views:
             self._views["settings"].refresh_db_stats()  # type: ignore[union-attr]
@@ -250,9 +259,16 @@ class MainWindow(ctk.CTk):
         if "studio_overview" in self._views:
             self._views["studio_overview"].refresh_apps(apps)  # type: ignore[union-attr]
 
+        if "studio_snapshots" in self._views:
+            self._views["studio_snapshots"].refresh(music_apps=apps)  # type: ignore[union-attr]
+
         health = self._views.get("plugin_health")
         if health is not None and self._plugins and hasattr(health, "refresh"):
             health.refresh(self._plugins, apps)  # type: ignore[union-attr]
+
+        vault = self._views.get("licenses")
+        if vault is not None and hasattr(vault, "refresh"):
+            vault.refresh(music_apps=apps)  # type: ignore[union-attr]
 
         if "settings" in self._views:
             self._views["settings"].refresh_db_stats()  # type: ignore[union-attr]
@@ -263,6 +279,9 @@ class MainWindow(ctk.CTk):
 
         if "studio_overview" in self._views:
             self._views["studio_overview"].refresh_hardware(devices)  # type: ignore[union-attr]
+
+        if "studio_snapshots" in self._views:
+            self._views["studio_snapshots"].refresh(hardware_devices=devices)  # type: ignore[union-attr]
 
     # ── View factory ──────────────────────────────────────────────────────────
 
@@ -351,6 +370,23 @@ class MainWindow(ctk.CTk):
                 view = MigrationAssistantView(self._content_area, settings=s)
                 if self._plugins:
                     view.refresh(self._plugins)
+                return view
+
+            case "studio_snapshots":
+                view = StudioSnapshotsView(
+                    self._content_area,
+                    plugins=list(self._plugins),
+                    music_apps=list(self._music_apps),
+                    hardware_devices=list(self._hardware_devices),
+                )
+                return view
+
+            case "licenses":
+                view = LicenseVaultView(
+                    self._content_area,
+                    plugins=self._plugins,
+                    music_apps=self._music_apps,
+                )
                 return view
 
             case "settings":
