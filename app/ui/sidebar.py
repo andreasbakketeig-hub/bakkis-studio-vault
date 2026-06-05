@@ -6,8 +6,8 @@ Layout
   Sidebar (CTkFrame, fixed width, fills window height)
   ├── Header  — brand name + collapse toggle  [fixed, never scrolls]
   ├── Nav     — CTkScrollableFrame            [expands, scrollable]
-  │   ├── "MODULES" section label
-  │   └── 12 nav items with left-accent indicator
+  │   ├── section headers (DASHBOARD, PLUGIN SUITE, …)
+  │   └── nav items with left-accent indicator
   └── Footer  — logo + version               [fixed, never scrolls]
 
 Collapse mode
@@ -41,20 +41,34 @@ SCROLLBAR_HOVER = "#323A5A"
 SIDEBAR_W   = 218   # expanded width
 SIDEBAR_COL = 52    # collapsed width
 
-# ── Navigation items  (key, icon, full label) ─────────────────────────────────
+# ── Navigation sections  (title, [(key, icon, label), …]) ─────────────────────
+NAV_SECTIONS: list[tuple[str, list[tuple[str, str, str]]]] = [
+    ("DASHBOARD", [
+        ("studio_overview", "▣", "Studio Overview"),
+    ]),
+    ("PLUGIN SUITE", [
+        ("plugins",         "◈", "Plug-in Scanner"),
+        ("format_analysis", "⊞", "Format Analysis"),
+        ("plugin_health",   "◎", "Plugin Health"),
+        ("quarantine",      "▣", "Quarantined Items"),
+        ("cleanup",         "◯", "Cleanup Recommendations"),
+    ]),
+    ("STUDIO TOOLS", [
+        ("music_software",  "♬", "Music Software Scanner"),
+        ("migration",       "⇄", "Migration Assistant"),
+        ("hardware",        "⬢", "Hardware Inventory"),
+        ("midi",            "♩", "MIDI Devices"),
+        ("mapper",          "⋈", "Studio Mapper"),
+    ]),
+    ("ADMIN", [
+        ("licenses",        "⬡", "License Vault"),
+        ("settings",        "⚙", "Settings"),
+    ]),
+]
+
+# Flat list derived from sections — used for collapse/expand label restoration.
 NAV_ITEMS: list[tuple[str, str, str]] = [
-    ("studio_overview", "▣", "Studio Overview"),
-    ("plugins",         "◈", "Plug-in Scanner"),
-    ("format_analysis", "⊞", "Format Analysis"),
-    ("plugin_health",   "◎", "Plugin Health"),
-    ("cleanup",         "◯", "Cleanup Recommendations"),
-    ("music_software",  "♬", "Music Software Scanner"),
-    ("migration",       "⇄", "Migration Assistant"),
-    ("licenses",        "⬡", "License Vault"),
-    ("hardware",        "⬢", "Hardware Inventory"),
-    ("midi",            "♩", "MIDI Devices"),
-    ("mapper",          "⋈", "Studio Mapper"),
-    ("settings",        "⚙", "Settings"),
+    item for _title, items in NAV_SECTIONS for item in items
 ]
 
 
@@ -83,9 +97,10 @@ class Sidebar(ctk.CTkFrame):
         self._on_navigate  = on_navigate
         self._active_key   = ""
         self._collapsed    = False
-        self._buttons:    dict[str, ctk.CTkButton] = {}
-        self._indicators: dict[str, tk.Canvas]     = {}
-        self._wrappers:   dict[str, tk.Frame]       = {}
+        self._buttons:         dict[str, ctk.CTkButton] = {}
+        self._indicators:      dict[str, tk.Canvas]     = {}
+        self._wrappers:        dict[str, tk.Frame]       = {}
+        self._section_labels:  list[ctk.CTkLabel]       = []
 
         # Prevent the frame from shrinking to fit children;
         # parent grid gives it its actual height.
@@ -170,23 +185,28 @@ class Sidebar(ctk.CTkFrame):
         # Make the inner scrollable column fill the sidebar width
         self._nav_scroll.grid_columnconfigure(0, weight=1)
 
-        # ── Section label ─────────────────────────────────────────────────────
-        self._section_lbl = ctk.CTkLabel(
-            self._nav_scroll,
-            text="MODULES",
-            font=ctk.CTkFont(size=9, weight="bold"),
-            text_color=SECTION_LABEL,
-            anchor="w",
-        )
-        self._section_lbl.grid(row=0, column=0, sticky="w", padx=22, pady=(14, 4))
+        # ── Section headers + nav items ───────────────────────────────────────
+        grid_row = 0
+        for section_idx, (section_title, section_items) in enumerate(NAV_SECTIONS):
+            top_pad = (14, 4) if section_idx == 0 else (16, 4)
+            section_lbl = ctk.CTkLabel(
+                self._nav_scroll,
+                text=section_title,
+                font=ctk.CTkFont(size=9, weight="bold"),
+                text_color=SECTION_LABEL,
+                anchor="w",
+            )
+            section_lbl.grid(row=grid_row, column=0, sticky="w", padx=22, pady=top_pad)
+            self._section_labels.append(section_lbl)
+            grid_row += 1
 
-        # ── Nav items ─────────────────────────────────────────────────────────
-        for i, (key, icon, label) in enumerate(NAV_ITEMS):
-            self._build_nav_item(key, icon, label, row=1 + i)
+            for key, icon, label in section_items:
+                self._build_nav_item(key, icon, label, row=grid_row)
+                grid_row += 1
 
         # Small bottom padding inside scroll area
         ctk.CTkFrame(self._nav_scroll, height=10, fg_color="transparent").grid(
-            row=1 + len(NAV_ITEMS), column=0,
+            row=grid_row, column=0,
         )
 
     def _build_nav_item(self, key: str, icon: str, label: str, row: int) -> None:
@@ -293,7 +313,8 @@ class Sidebar(ctk.CTkFrame):
         # Shrink brand to just the first letter
         self._brand_title.configure(text="B")
         self._brand_sub.pack_forget()
-        self._section_lbl.grid_remove()
+        for lbl in self._section_labels:
+            lbl.grid_remove()
         self._toggle_btn.configure(text="›")
         # Buttons: icon only, centred
         for key, icon, _label in NAV_ITEMS:
@@ -308,7 +329,8 @@ class Sidebar(ctk.CTkFrame):
         self.configure(width=SIDEBAR_W)
         self._brand_title.configure(text="BAKKIS")
         self._brand_sub.pack(anchor="w", pady=(1, 0))
-        self._section_lbl.grid()
+        for lbl in self._section_labels:
+            lbl.grid()
         self._toggle_btn.configure(text="‹")
         # Buttons: icon + full label
         for key, icon, label in NAV_ITEMS:
