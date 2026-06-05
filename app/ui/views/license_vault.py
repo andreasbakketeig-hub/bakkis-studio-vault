@@ -15,7 +15,7 @@ from __future__ import annotations
 import subprocess
 import tkinter as tk
 from tkinter import ttk
-from typing import Callable, Sequence
+from typing import Sequence
 
 import customtkinter as ctk
 
@@ -245,10 +245,6 @@ class LicenseVaultView(ctk.CTkFrame):
 
 
 # ── Shared helpers ─────────────────────────────────────────────────────────────
-
-def _status_badge_color(status: LicenseStatus) -> str:
-    return STATUS_COLOR.get(status, COLOR_UNKNOWN)
-
 
 def _make_treeview_style(style_name: str) -> None:
     """Configure a dark Treeview style named *style_name*."""

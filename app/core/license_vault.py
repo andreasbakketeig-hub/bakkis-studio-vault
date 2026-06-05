@@ -12,11 +12,9 @@ Consumes data from:
 
 from __future__ import annotations
 
-import re
 import subprocess
 from dataclasses import dataclass, field
 from enum import Enum
-from pathlib import Path
 from typing import Sequence
 
 from app.core.scanner import Plugin
@@ -329,27 +327,27 @@ def classify_products(
             vendor_display = developer or "Unknown"
             license_manager = ""
             website = ""
-        elif vendor_entry.website_only:
-            status = LicenseStatus.WEBSITE_MANAGED
-            vendor_key = vendor_entry.vendor_key
-            vendor_display = vendor_entry.display_name
-            license_manager = vendor_entry.manager_display
-            website = vendor_entry.website_url
         else:
             vendor_key = vendor_entry.vendor_key
             vendor_display = vendor_entry.display_name
             website = vendor_entry.website_url
             mgr_def = _VENDOR_TO_MANAGER.get(vendor_key)
-            if mgr_def is None:
-                # Vendor known but no manager mapped → manual
+            if mgr_def is not None:
+                # Known manager exists for this vendor — check if installed
+                if mgr_def.manager_key in installed_keys:
+                    status = LicenseStatus.MANAGED
+                    license_manager = mgr_def.display_name
+                else:
+                    status = LicenseStatus.MISSING_MANAGER
+                    license_manager = mgr_def.display_name
+            elif vendor_entry.website_only:
+                # No app manager — vendor explicitly uses website licensing
+                status = LicenseStatus.WEBSITE_MANAGED
+                license_manager = vendor_entry.manager_display
+            else:
+                # Vendor known but no manager mapping and not website-only → manual
                 status = LicenseStatus.MANUAL_LICENSE
                 license_manager = ""
-            elif mgr_def.manager_key in installed_keys:
-                status = LicenseStatus.MANAGED
-                license_manager = mgr_def.display_name
-            else:
-                status = LicenseStatus.MISSING_MANAGER
-                license_manager = mgr_def.display_name
 
         results.append(LicenseProduct(
             product_name=product_name,
