@@ -243,31 +243,54 @@ def _bundle_metadata(bundle: Path) -> dict:
     # Developer — try several keys in priority order
     developer = ""
 
-    # 1. AudioComponents array (AU / VST3 often populate this)
+    def _is_year_or_version(s: str) -> bool:
+        """Return True when s is a bare year, year-range, or version number."""
+        return bool(re.fullmatch(r"\d{4}(?:-\d{4})?|\d+\.\d+(?:\.\d+)*", s.strip()))
+
+    # 1. AudioComponents array (AU / VST3 often populate this).
+    #    Format is "Manufacturer: Plugin Name" — use the part before the colon.
+    #    If no colon is present, fall back to the explicit 'manufacturer' string key.
     audio_components = plist.get("AudioComponents") or []
     if audio_components and isinstance(audio_components, list):
-        comp_name: str = audio_components[0].get("name", "")
+        comp = audio_components[0]
+        comp_name: str = comp.get("name", "")
         if ":" in comp_name:
-            developer = comp_name.split(":")[0].strip()
+            candidate = comp_name.split(":")[0].strip()
+            if candidate and not _is_year_or_version(candidate):
+                developer = candidate
+        if not developer:
+            # 'manufacturer' inside AudioComponents is a 4-char OSType int on
+            # some plists, but is occasionally a human-readable string.
+            mfr = comp.get("manufacturer", "")
+            if isinstance(mfr, str) and len(mfr) > 2 and not _is_year_or_version(mfr):
+                developer = mfr.strip()
 
     # 2. CFBundleGetInfoString  e.g. "Plugin 2.0, © 2023 Acme Audio"
+    #    Split on ©, strip the leading year / year-range, then take the text
+    #    up to the first comma or period as the vendor name.
     if not developer:
         info_str: str = plist.get("CFBundleGetInfoString", "")
         if "©" in info_str:
-            parts = info_str.split("©")
-            candidate = parts[-1].strip().split(" ")[0]
-            if len(candidate) > 2:
+            after_copy = info_str.split("©")[-1].strip()
+            # Remove leading year or year-range (e.g. "2023" or "2001-2023")
+            after_copy = re.sub(r"^\d{4}(?:-\d{4})?\s*", "", after_copy)
+            candidate = re.split(r"[,.\n]", after_copy)[0].strip()
+            if candidate and not _is_year_or_version(candidate):
                 developer = candidate
 
     # 3. NSHumanReadableCopyright  e.g. "© 2023 Acme Audio, Inc."
+    #    Year-ranges like "2001-2023" must be consumed before the capture group.
     if not developer:
         copyright_str: str = plist.get("NSHumanReadableCopyright", "")
         if copyright_str:
-            # Strip leading "© YYYY " pattern
-            import re
-            match = re.search(r"©\s*\d{0,4}\s*([\w\s&]+?)(?:,|\.|Inc|LLC|Ltd|$)", copyright_str)
+            match = re.search(
+                r"©\s*\d{4}(?:-\d{4})?\s*([\w][\w\s&\-]*?)(?:\s*,|\s*\.|Inc|LLC|Ltd|GmbH|AB|BV|$)",
+                copyright_str,
+            )
             if match:
-                developer = match.group(1).strip()
+                candidate = match.group(1).strip()
+                if candidate and not _is_year_or_version(candidate):
+                    developer = candidate
 
     # 4. CFBundleIdentifier  e.g. "com.acmeaudio.reverb"  → "Acmeaudio"
     if not developer:

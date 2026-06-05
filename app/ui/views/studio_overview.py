@@ -229,6 +229,7 @@ class StudioOverviewView(ctk.CTkFrame):
         self,
         parent: ctk.CTkFrame,
         on_navigate: Callable[[str], None] | None = None,
+        settings=None,
         **kwargs,
     ):
         super().__init__(parent, fg_color="transparent", **kwargs)
@@ -242,6 +243,18 @@ class StudioOverviewView(ctk.CTkFrame):
         self._health_ring: _ArcProgress | None = None
         self._mig_ring: _ArcProgress | None = None
         self._last_scan_lbl: ctk.CTkLabel | None = None
+
+        # Settings-derived values
+        self._preferred_daw: str = settings.preferred_daw if settings else ""
+        self._machine_role: str = settings.machine_role if settings else ""
+        self._machine_name: str = settings.machine_display_name if settings else ""
+        self._preferred_formats: list[str] = (
+            settings.preferred_formats if settings else ["VST3", "AU"]
+        )
+        self._migration_threshold: int = (
+            settings.migration_readiness_threshold if settings else 80
+        )
+
         self._build()
 
     # ── Public API ─────────────────────────────────────────────────────────────
@@ -283,6 +296,21 @@ class StudioOverviewView(ctk.CTkFrame):
             font=ctk.CTkFont(size=12),
             text_color=TEXT_MUTED,
         ).pack(anchor="w", pady=(3, 0))
+
+        # Studio profile context line (DAW + machine role)
+        context_parts: list[str] = []
+        if self._preferred_daw:
+            context_parts.append(f"DAW: {self._preferred_daw}")
+        if self._machine_role:
+            label = self._machine_name or "This machine"
+            context_parts.append(f"{label}  ·  {self._machine_role}")
+        if context_parts:
+            ctk.CTkLabel(
+                left,
+                text="  ·  ".join(context_parts),
+                font=ctk.CTkFont(size=10),
+                text_color=ACCENT,
+            ).pack(anchor="w", pady=(2, 0))
 
         right = ctk.CTkFrame(hdr, fg_color="transparent")
         right.grid(row=0, column=1, sticky="e", padx=30)
@@ -593,6 +621,17 @@ class StudioOverviewView(ctk.CTkFrame):
             v.grid(row=r, column=1, sticky="e", pady=5)
             self._lbl[key] = v
 
+        # Threshold label (below progress items)
+        threshold_lbl = ctk.CTkLabel(
+            c,
+            text=f"Threshold: {self._migration_threshold}%",
+            font=ctk.CTkFont(size=10),
+            text_color=TEXT_MUTED,
+            anchor="w",
+        )
+        threshold_lbl.grid(row=5, column=0, sticky="w", padx=16, pady=(4, 0))
+        self._lbl["mig_threshold"] = threshold_lbl
+
         if self._on_navigate:
             ctk.CTkButton(
                 c,
@@ -604,13 +643,13 @@ class StudioOverviewView(ctk.CTkFrame):
                 hover_color=ACCENT,
                 text_color=TEXT_PRIMARY,
                 command=lambda: self._on_navigate("migration"),
-            ).grid(row=5, column=0, sticky="ew", padx=16, pady=(12, 16))
+            ).grid(row=6, column=0, sticky="ew", padx=16, pady=(8, 16))
 
         apps_hint = ctk.CTkLabel(
             c, text="Run  ♬ Music Software Scanner  to detect apps",
             font=ctk.CTkFont(size=10), text_color=TEXT_MUTED, anchor="w",
         )
-        apps_hint.grid(row=6, column=0, sticky="w", padx=16, pady=(0, 8))
+        apps_hint.grid(row=7, column=0, sticky="w", padx=16, pady=(0, 8))
         self._lbl["mig_hint"] = apps_hint
 
     # ── Storage Overview ──────────────────────────────────────────────────────
@@ -919,16 +958,38 @@ class StudioOverviewView(ctk.CTkFrame):
         total = n_apps + n_plugins
         if total == 0:
             return
-        n_clean = n_apps + sum(1 for p in self._plugins
-                               if p.fmt in ("VST3", "AU"))
+
+        # Use preferred_formats from settings to determine "migration-clean" plugins
+        preferred_set = set(self._preferred_formats) if self._preferred_formats else {"VST3", "AU"}
+        n_clean = n_apps + sum(1 for p in self._plugins if p.fmt in preferred_set)
         pct = int(100 * n_clean / max(total, 1))
         pct = min(pct, 100)
+
+        # Apply readiness threshold from settings for color coding
+        threshold = self._migration_threshold
+        if pct >= threshold:
+            ring_color = GREEN
+            sub_text = "Ready"
+        elif pct >= threshold * 0.6:
+            ring_color = ORANGE
+            sub_text = "In Progress"
+        else:
+            ring_color = RED
+            sub_text = "Not Ready"
+
         self._mig_ring.render(
             pct, max_val=100,
-            color=GREEN if pct >= 70 else (ORANGE if pct >= 40 else RED),
+            color=ring_color,
             center_text=f"{pct}%",
-            center_sub="Ready",
+            center_sub=sub_text,
         )
+
+        # Update threshold hint label if it exists
+        if "mig_threshold" in self._lbl:
+            self._lbl["mig_threshold"].configure(
+                text=f"Threshold: {threshold}%",
+                text_color=TEXT_MUTED,
+            )
 
     def _rebuild_vendors(
         self,

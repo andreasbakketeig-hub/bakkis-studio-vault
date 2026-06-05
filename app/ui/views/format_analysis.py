@@ -42,10 +42,14 @@ FMT_COLORS: dict[str, str] = {
 class FormatAnalysisView(ctk.CTkFrame):
     """Shows plug-ins grouped by product name with format-overlap analysis."""
 
-    def __init__(self, parent: ctk.CTkFrame, **kwargs):
+    def __init__(self, parent: ctk.CTkFrame, settings=None, **kwargs):
         super().__init__(parent, fg_color="transparent", **kwargs)
         self._groups: list[FormatGroup] = []
         self._iid_to_group: dict[str, FormatGroup] = {}
+        self._preferred_formats: list[str] = (
+            settings.preferred_formats if settings else ["VST3", "AU"]
+        )
+        self._accent: str = (settings.accent_color if settings else None) or ACCENT
         self._build()
 
     # ── Layout ────────────────────────────────────────────────────────────────
@@ -339,8 +343,19 @@ class FormatAnalysisView(ctk.CTkFrame):
         self._status_label.configure(
             text=f"{len(duplicates):,} of {total_products:,} products have multiple formats  ({pct})"
         )
+
+        # Show how many products have at least one preferred format installed
+        preferred_set = set(self._preferred_formats)
+        covered = sum(
+            1 for g in self._groups
+            if preferred_set & set(g.formats.keys())
+        )
+        pref_label = " · ".join(self._preferred_formats) if self._preferred_formats else "—"
         self._total_label.configure(
-            text=f"{sum(len(g.formats) for g in self._groups):,} total format copies scanned"
+            text=(
+                f"{sum(len(g.formats) for g in self._groups):,} total format copies  ·  "
+                f"Preferred [{pref_label}]: {covered:,} / {total_products:,} products covered"
+            )
         )
 
     # ── Reveal in Finder ──────────────────────────────────────────────────────

@@ -178,11 +178,20 @@ class ComparisonResult:
 def create_snapshot(
     plugins: "list[Plugin]",
     apps: "list[MusicApp]",
+    machine_name: str = "",
+    machine_role: str = "",
 ) -> MigrationSnapshot:
-    """Build a MigrationSnapshot from live scan data."""
+    """Build a MigrationSnapshot from live scan data.
+
+    machine_name overrides the hostname shown in snapshots and exports.
+    machine_role is stored in the snapshot metadata for comparison context.
+    """
+    hostname = machine_name.strip() or _get_hostname()
+    if machine_role.strip():
+        hostname = f"{hostname}  [{machine_role.strip()}]"
     return MigrationSnapshot(
         created_at=datetime.datetime.now().isoformat(timespec="seconds"),
-        hostname=_get_hostname(),
+        hostname=hostname,
         plugins=[_plugin_to_dict(p) for p in plugins],
         apps=[_app_to_dict(a) for a in apps],
     )
@@ -246,30 +255,57 @@ def compare_snapshots(
     reference: MigrationSnapshot,
     current_plugins: "list[Plugin]",
     current_apps: "list[MusicApp]",
+    comparison_behavior: str = "Match by name",
 ) -> ComparisonResult:
     """
     Compare *reference* (old system) against the currently installed set.
     Returns a ComparisonResult with per-item statuses.
+
+    comparison_behavior controls plugin matching:
+      - "Match by name"           : case-insensitive name match (default)
+      - "Match by name + version" : name + version must both match
+      - "Strict path match"       : name + developer must both match
     """
     result = ComparisonResult()
 
-    current_plugin_names = {p.name.lower() for p in current_plugins}
+    # Build current-plugin lookup based on behavior
+    if comparison_behavior == "Match by name + version":
+        current_plugin_keys = {
+            f"{p.name.lower()}|{p.version or ''}" for p in current_plugins
+        }
+    elif comparison_behavior == "Strict path match":
+        current_plugin_keys = {
+            f"{p.name.lower()}|{p.developer.lower()}" for p in current_plugins
+        }
+    else:
+        current_plugin_keys = {p.name.lower() for p in current_plugins}
+
     for p in reference.plugins:
-        name = p.get("name", "")
-        fmt  = p.get("fmt", "")
-        if name.lower() in current_plugin_names:
+        name      = p.get("name", "")
+        fmt       = p.get("fmt", "")
+        version   = p.get("version", "") or ""
+        developer = p.get("developer", "") or ""
+
+        if comparison_behavior == "Match by name + version":
+            key = f"{name.lower()}|{version}"
+        elif comparison_behavior == "Strict path match":
+            key = f"{name.lower()}|{developer.lower()}"
+        else:
+            key = name.lower()
+
+        if key in current_plugin_keys:
             result.present_plugins.append(ComparisonItem(
                 name=name,
                 category=fmt,
                 status=STATUS_INSTALLED,
-                details=f"v{p['version']}" if p.get("version") else "",
+                details=f"v{version}" if version else "",
             ))
         else:
             result.missing_plugins.append(ComparisonItem(
                 name=name,
                 category=fmt,
                 status=STATUS_MISSING,
-                details=p.get("developer", ""),
+                details=developer,
             ))
 
     current_app_names = {a.name.lower() for a in current_apps}

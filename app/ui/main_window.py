@@ -27,6 +27,39 @@ from app.ui.views.coming_soon import ComingSoonView
 BG_MAIN = "#0D0F18"
 BG_CONTENT = "#10131C"
 
+_PREFERRED_W = 1800
+_PREFERRED_H = 1100
+_MIN_W = 1400
+_MIN_H = 900
+
+
+def _initial_window_geometry(root: ctk.CTk) -> tuple[int, int, int, int]:
+    """Return (width, height, x, y) for the launch window."""
+    root.update_idletasks()
+    screen_w = root.winfo_screenwidth()
+    screen_h = root.winfo_screenheight()
+
+    if screen_w >= _PREFERRED_W and screen_h >= _PREFERRED_H:
+        width, height = _PREFERRED_W, _PREFERRED_H
+    else:
+        width = int(screen_w * 0.90)
+        height = int(screen_h * 0.85)
+
+    width = min(width, screen_w)
+    height = min(height, screen_h)
+
+    x = max(0, (screen_w - width) // 2)
+    y = max(0, (screen_h - height) // 2)
+    return width, height, x, y
+
+# Theme preset → (main_bg, content_bg)
+_THEME_COLORS: dict[str, tuple[str, str]] = {
+    "Midnight Blue": ("#0D0F18", "#10131C"),
+    "Deep Space":    ("#08090F", "#0C0E16"),
+    "Graphite":      ("#0F1014", "#111318"),
+    "Obsidian":      ("#0A0A0A", "#0D0D0D"),
+}
+
 
 class MainWindow(ctk.CTk):
     """Root application window."""
@@ -38,19 +71,17 @@ class MainWindow(ctk.CTk):
         ctk.set_default_color_theme("blue")
 
         self.title("Bakkis Studio Manager")
-        self.geometry("1200x740")
-        self.minsize(900, 600)
         self.configure(fg_color=BG_MAIN)
 
-        # macOS window chrome
-        try:
-            self.tk.call(
-                "::tk::unsupported::MacWindowStyle",
-                "style", self._w, "document",
-                "closeBox collapseBox resizable",
-            )
-        except Exception:
-            pass
+        self.minsize(_MIN_W, _MIN_H)
+
+        width, height, x, y = _initial_window_geometry(self)
+        self.geometry(f"{width}x{height}+{x}+{y}")
+
+        # Must be last in window setup: MacWindowStyle (removed) was resetting wm resizable
+        # to (0, 0) on macOS, which removes resize handles.
+        self.resizable(True, True)
+        self.after_idle(self._ensure_resizable)
 
         # ── Database & repositories ───────────────────────────────────────────
         self._db              = Database()
@@ -58,6 +89,9 @@ class MainWindow(ctk.CTk):
         self._apps_repo       = MusicAppRepository(self._db)
         self._settings_repo   = SettingsRepository(self._db)
         self._app_settings    = AppSettings.load(self._settings_repo)
+
+        # Apply theme preset from persisted settings immediately
+        self._apply_theme_colors()
 
         # ── Load cached scan data ─────────────────────────────────────────────
         self._views: dict[str, ctk.CTkFrame] = {}
@@ -75,8 +109,16 @@ class MainWindow(ctk.CTk):
         self._build()
         self._navigate("studio_overview")
 
+        # ── Auto rescan on launch ─────────────────────────────────────────────
+        if self._app_settings.auto_rescan_on_launch:
+            self.after(800, self._trigger_auto_rescan)
+
         # Tidy up the DB connection when the window is closed
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    def _ensure_resizable(self) -> None:
+        """Re-assert resize capability after Tk finishes initial window setup."""
+        self.resizable(True, True)
 
     # ── Layout ────────────────────────────────────────────────────────────────
 
@@ -109,6 +151,12 @@ class MainWindow(ctk.CTk):
         self._active_key = key
         self._sidebar.activate(key)
 
+        # Re-run responsive table layout after the view is mapped at full size.
+        relayout = getattr(view, "_relayout_tree_columns", None)
+        if callable(relayout):
+            self.after_idle(relayout)
+            self.after(100, relayout)
+
         if hasattr(view, "refresh_db_stats"):
             view.refresh_db_stats()
 
@@ -140,11 +188,13 @@ class MainWindow(ctk.CTk):
     # ── View factory ──────────────────────────────────────────────────────────
 
     def _create_view(self, key: str) -> ctk.CTkFrame:
+        s = self._app_settings
         match key:
             case "studio_overview":
                 view = StudioOverviewView(
                     self._content_area,
                     on_navigate=self._navigate,
+                    settings=s,
                 )
                 if self._plugins:
                     view.refresh(self._plugins)
@@ -161,19 +211,19 @@ class MainWindow(ctk.CTk):
                 )
 
             case "format_analysis":
-                view = FormatAnalysisView(self._content_area)
+                view = FormatAnalysisView(self._content_area, settings=s)
                 if self._plugins:
                     view.refresh(self._plugins)
                 return view
 
             case "plugin_health":
-                view = PluginHealthView(self._content_area)
+                view = PluginHealthView(self._content_area, settings=s)
                 if self._plugins:
                     view.refresh(self._plugins)
                 return view
 
             case "cleanup":
-                view = CleanupRecommendationsView(self._content_area)
+                view = CleanupRecommendationsView(self._content_area, settings=s)
                 if self._plugins:
                     view.refresh(self._plugins)
                 return view
@@ -187,16 +237,82 @@ class MainWindow(ctk.CTk):
                 )
 
             case "migration":
-                view = MigrationAssistantView(self._content_area)
+                view = MigrationAssistantView(self._content_area, settings=s)
                 if self._plugins:
                     view.refresh(self._plugins)
                 return view
 
             case "settings":
-                return SettingsView(self._content_area, db=self._db)
+                return SettingsView(
+                    self._content_area,
+                    db=self._db,
+                    on_settings_saved=self._on_settings_saved,
+                )
 
             case _:
                 return ComingSoonView(self._content_area, module_key=key)
+
+    # ── Settings saved callback ───────────────────────────────────────────────
+
+    def _on_settings_saved(self, _saved: AppSettings) -> None:
+        """Called by SettingsView after the user saves. Propagates changes live."""
+        # Reload fresh settings from DB
+        self._app_settings = AppSettings.load(self._settings_repo)
+
+        # Live accent: update sidebar indicator immediately
+        self._sidebar.update_accent(self._app_settings.accent_color)
+
+        # Live theme: update window and content area background colors
+        self._apply_theme_colors()
+
+        # Invalidate all cached views (except settings) so they're recreated
+        # with the new settings on next navigation.
+        active = self._active_key
+        for key in list(self._views.keys()):
+            if key == "settings":
+                continue
+            try:
+                self._views[key].grid_remove()
+                self._views[key].destroy()
+            except Exception:
+                pass
+            del self._views[key]
+
+        # Re-navigate to the current non-settings view so it refreshes instantly
+        if active and active != "settings":
+            self._active_key = ""
+            self._navigate(active)
+
+    def _apply_theme_colors(self) -> None:
+        """Apply theme preset background colors to window and content area."""
+        main_bg, content_bg = _THEME_COLORS.get(
+            self._app_settings.theme_preset, (BG_MAIN, BG_CONTENT)
+        )
+        self.configure(fg_color=main_bg)
+        if hasattr(self, "_content_area"):
+            self._content_area.configure(fg_color=content_bg)
+
+    # ── Auto rescan on launch ─────────────────────────────────────────────────
+
+    def _trigger_auto_rescan(self) -> None:
+        """Run a background scan if auto_rescan_on_launch is enabled."""
+        import threading
+        from app.core.scanner import scan_plugins
+        from app.core.music_software_scanner import scan_music_apps
+
+        def _scan() -> None:
+            try:
+                result = scan_plugins()
+                self.after(0, lambda r=result: self._on_plugins_ready(r.plugins))
+            except Exception:
+                pass
+            try:
+                apps = scan_music_apps()
+                self.after(0, lambda a=apps: self._on_apps_ready(a))
+            except Exception:
+                pass
+
+        threading.Thread(target=_scan, daemon=True).start()
 
     # ── Shutdown ──────────────────────────────────────────────────────────────
 

@@ -19,6 +19,12 @@ from app.core.health import (
     CAT_WARNING,
     CAT_DUPLICATE,
 )
+from app.ui.tree_columns import (
+    FixedColumn,
+    FlexColumn,
+    TreeColumnLayout,
+    bind_responsive_tree_columns,
+)
 
 # ── Design System ─────────────────────────────────────────────────────────────
 BG_CARD          = "#131720"
@@ -57,17 +63,33 @@ _FILTERS: list[tuple[str, str]] = [
     (CAT_BROKEN,    "Broken"),
 ]
 
+_HEALTH_COLUMNS = TreeColumnLayout(
+    fixed=(
+        FixedColumn("issue_type", 170, "w"),
+        FixedColumn("fmt", 56, "center"),
+    ),
+    flex=(
+        FlexColumn("name", weight=1.0, min_width=100, anchor="w"),
+        FlexColumn("path", weight=1.4, min_width=140, anchor="w"),
+        FlexColumn("action", weight=3.0, min_width=200, anchor="w"),
+    ),
+)
+
 
 class PluginHealthView(ctk.CTkFrame):
     """Plugin Health module — surfaces issues in the scanned plug-in list."""
 
-    def __init__(self, parent: ctk.CTkFrame, **kwargs):
+    def __init__(self, parent: ctk.CTkFrame, settings=None, **kwargs):
         super().__init__(parent, fg_color="transparent", **kwargs)
 
         self._report: HealthReport | None = None
         self._active_filter: str = FILTER_ALL
         self._iid_to_issue: dict[str, HealthIssue] = {}
         self._filter_btns: dict[str, ctk.CTkButton] = {}
+        self._vst2_sensitivity: str = (
+            settings.legacy_vst2_sensitivity if settings else "Medium"
+        )
+        self._accent: str = (settings.accent_color if settings else None) or ACCENT
 
         self._build()
 
@@ -156,6 +178,22 @@ class PluginHealthView(ctk.CTkFrame):
         bar = ctk.CTkFrame(self, fg_color="transparent")
         bar.grid(row=2, column=0, sticky="ew", padx=30, pady=(14, 0))
 
+        # VST2 sensitivity indicator
+        vst2_label_map = {
+            "Low":    ("VST2 Sensitivity: Low — only flagged when modern version exists", "#4ADE80"),
+            "Medium": ("VST2 Sensitivity: Medium", "#94A3B8"),
+            "High":   ("VST2 Sensitivity: High — all VST2 flagged as broken", "#F87171"),
+        }
+        vst2_text, vst2_color = vst2_label_map.get(
+            self._vst2_sensitivity, ("VST2 Sensitivity: Medium", "#94A3B8")
+        )
+        ctk.CTkLabel(
+            bar,
+            text=vst2_text,
+            font=ctk.CTkFont(size=10),
+            text_color=vst2_color,
+        ).pack(side="right")
+
         for key, label in _FILTERS:
             is_active = key == FILTER_ALL
             btn = ctk.CTkButton(
@@ -165,7 +203,7 @@ class PluginHealthView(ctk.CTkFrame):
                 height=34,
                 corner_radius=9,
                 font=ctk.CTkFont(size=12),
-                fg_color=ACCENT if is_active else BG_CARD,
+                fg_color=self._accent if is_active else BG_CARD,
                 hover_color=ACCENT_HOVER if is_active else BORDER_BRIGHT,
                 text_color=TEXT_PRIMARY if is_active else TEXT_MUTED,
                 border_width=1,
@@ -176,13 +214,14 @@ class PluginHealthView(ctk.CTkFrame):
             self._filter_btns[key] = btn
 
     def _build_table(self) -> None:
-        container = ctk.CTkFrame(
+        self._table_container = ctk.CTkFrame(
             self, fg_color=BG_CARD, corner_radius=14,
             border_width=1, border_color=BORDER,
         )
-        container.grid(row=3, column=0, sticky="nsew", padx=30, pady=(14, 0))
-        container.grid_rowconfigure(1, weight=1)
-        container.grid_columnconfigure(0, weight=1)
+        self._table_container.grid(row=3, column=0, sticky="nsew", padx=30, pady=(14, 0))
+        self._table_container.grid_rowconfigure(1, weight=1)
+        self._table_container.grid_columnconfigure(0, weight=1)
+        container = self._table_container
 
         ctk.CTkFrame(container, height=1, fg_color=BORDER).grid(
             row=0, column=0, sticky="ew", padx=16, pady=(12, 0),
@@ -223,16 +262,14 @@ class PluginHealthView(ctk.CTkFrame):
             tree_frame, columns=columns,
             show="headings", style="Health.Treeview", selectmode="browse",
         )
-        col_cfg = [
-            ("name",       "PLUGIN NAME",     180, True,  "w"),
-            ("issue_type", "ISSUE TYPE",       190, False, "w"),
-            ("fmt",        "FORMAT",            70, False, "center"),
-            ("path",       "FILE PATH",        290, True,  "w"),
-            ("action",     "SUGGESTED ACTION", 250, True,  "w"),
-        ]
-        for col_id, heading, width, stretch, anchor in col_cfg:
+        for col_id, heading in (
+            ("name", "PLUGIN NAME"),
+            ("issue_type", "ISSUE TYPE"),
+            ("fmt", "FORMAT"),
+            ("path", "FILE PATH"),
+            ("action", "SUGGESTED ACTION"),
+        ):
             self._tree.heading(col_id, text=heading)
-            self._tree.column(col_id, width=width, minwidth=50, stretch=stretch, anchor=anchor)
 
         vsb = ttk.Scrollbar(tree_frame, orient="vertical",   command=self._tree.yview)
         hsb = ttk.Scrollbar(tree_frame, orient="horizontal", command=self._tree.xview)
@@ -247,6 +284,13 @@ class PluginHealthView(ctk.CTkFrame):
             self._tree.tag_configure(f"{cat}_odd",  background=BG_TABLE_ROW_ALT, foreground=fg)
 
         self._tree.bind("<<TreeviewSelect>>", self._on_select)
+
+        self._relayout_tree_columns = bind_responsive_tree_columns(
+            self._tree,
+            tree_frame,
+            _HEALTH_COLUMNS,
+            extra_hosts=(container, self),
+        )
 
         self._empty_label = ctk.CTkLabel(
             container, text="",
@@ -285,7 +329,7 @@ class PluginHealthView(ctk.CTkFrame):
     # ── Public API ────────────────────────────────────────────────────────────
 
     def refresh(self, plugins: list[Plugin]) -> None:
-        self._report = analyze_health(plugins)
+        self._report = analyze_health(plugins, vst2_sensitivity=self._vst2_sensitivity)
         self._active_filter = FILTER_ALL
         self._update_filter_buttons()
         self._update_stat_cards()
@@ -302,7 +346,7 @@ class PluginHealthView(ctk.CTkFrame):
         for key, btn in self._filter_btns.items():
             active = key == self._active_filter
             btn.configure(
-                fg_color=ACCENT if active else BG_CARD,
+                fg_color=self._accent if active else BG_CARD,
                 hover_color=ACCENT_HOVER if active else BORDER_BRIGHT,
                 text_color=TEXT_PRIMARY if active else TEXT_MUTED,
             )
@@ -377,6 +421,8 @@ class PluginHealthView(ctk.CTkFrame):
             self._iid_to_issue[iid] = issue
 
         self._update_status(len(issues))
+        if hasattr(self, "_relayout_tree_columns"):
+            self.after_idle(self._relayout_tree_columns)
 
     def _update_status(self, visible: int) -> None:
         if self._report is None:

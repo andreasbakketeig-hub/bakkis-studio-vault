@@ -15,6 +15,13 @@ import customtkinter as ctk
 
 from app.core.scanner import Plugin, ScanResult, scan_plugins
 from app.core.exporter import export_csv
+from app.ui.tree_columns import (
+    FixedColumn,
+    FlexColumn,
+    TreeColumnLayout,
+    bind_responsive_tree_columns,
+    truncate_for_column,
+)
 from app.utils.helpers import humanize_count
 
 # ── Design System ─────────────────────────────────────────────────────────────
@@ -41,6 +48,20 @@ FMT_COLORS: dict[str, str] = {
     "AAX":  "#A855F7",
 }
 
+_SCANNER_COLUMNS = TreeColumnLayout(
+    fixed=(
+        FixedColumn("developer", 120, "w"),
+        FixedColumn("version", 68, "center"),
+        FixedColumn("fmt", 56, "center"),
+        FixedColumn("size", 68, "e"),
+        FixedColumn("modified", 84, "center"),
+    ),
+    flex=(
+        FlexColumn("name", weight=1.0, min_width=120, anchor="w"),
+        FlexColumn("path", weight=2.0, min_width=160, anchor="w"),
+    ),
+)
+
 
 class PluginScannerView(ctk.CTkFrame):
     """Main content frame for the Plug-in Scanner module."""
@@ -58,6 +79,7 @@ class PluginScannerView(ctk.CTkFrame):
         self._on_plugins_ready = on_plugins_ready
         self._all_plugins: list[Plugin] = []
         self._filtered: list[Plugin] = []
+        self._iid_to_plugin: dict[str, Plugin] = {}
         self._scan_result: Optional[ScanResult] = None
         self._scanning = False
 
@@ -187,13 +209,14 @@ class PluginScannerView(ctk.CTkFrame):
         self._reveal_btn.grid(row=0, column=3, sticky="e", padx=(8, 0))
 
     def _build_table(self) -> None:
-        container = ctk.CTkFrame(
+        self._table_container = ctk.CTkFrame(
             self, fg_color=BG_CARD, corner_radius=14,
             border_width=1, border_color=BORDER,
         )
-        container.grid(row=2, column=0, sticky="nsew", padx=30, pady=(0, 0))
-        container.grid_rowconfigure(2, weight=1)
-        container.grid_columnconfigure(0, weight=1)
+        self._table_container.grid(row=2, column=0, sticky="nsew", padx=30, pady=(0, 0))
+        self._table_container.grid_rowconfigure(2, weight=1)
+        self._table_container.grid_columnconfigure(0, weight=1)
+        container = self._table_container
 
         ctk.CTkFrame(container, height=1, fg_color=BORDER).grid(
             row=1, column=0, sticky="ew", padx=16, pady=(12, 0),
@@ -237,18 +260,18 @@ class PluginScannerView(ctk.CTkFrame):
             style="Vault.Treeview",
             selectmode="extended",
         )
-        col_cfg = [
-            ("name",      "NAME",       200, True,  "w"),
-            ("developer", "DEVELOPER",  160, True,  "w"),
-            ("version",   "VERSION",     80, False, "center"),
-            ("fmt",       "FORMAT",      70, False, "center"),
-            ("size",      "SIZE",        75, False, "e"),
-            ("modified",  "MODIFIED",    95, False, "center"),
-            ("path",      "PATH",       340, True,  "w"),
-        ]
-        for col_id, heading, width, stretch, anchor in col_cfg:
+        for col_id, heading in (
+            ("name", "NAME"),
+            ("developer", "DEVELOPER"),
+            ("version", "VERSION"),
+            ("fmt", "FORMAT"),
+            ("size", "SIZE"),
+            ("modified", "MODIFIED"),
+            ("path", "PATH"),
+        ):
             self._tree.heading(col_id, text=heading)
-            self._tree.column(col_id, width=width, minwidth=50, stretch=stretch, anchor=anchor)
+
+        self._tree_frame = tree_frame
 
         vsb = ttk.Scrollbar(tree_frame, orient="vertical", command=self._tree.yview)
         hsb = ttk.Scrollbar(tree_frame, orient="horizontal", command=self._tree.xview)
@@ -264,6 +287,14 @@ class PluginScannerView(ctk.CTkFrame):
             self._tree.tag_configure(f"fmt_{fmt}", foreground=color)
 
         self._tree.bind("<<TreeviewSelect>>", self._on_tree_select)
+
+        self._relayout_tree_columns = bind_responsive_tree_columns(
+            self._tree,
+            tree_frame,
+            _SCANNER_COLUMNS,
+            on_layout=lambda _w: self._refresh_path_cells(),
+            extra_hosts=(container, self),
+        )
 
         self._empty_label = ctk.CTkLabel(
             container,
@@ -342,19 +373,46 @@ class PluginScannerView(ctk.CTkFrame):
     def _clear_table(self) -> None:
         for row in self._tree.get_children():
             self._tree.delete(row)
+        self._iid_to_plugin.clear()
         self._reveal_btn.configure(state="disabled", text_color=TEXT_MUTED)
+
+    def _plugin_row_values(self, plugin: Plugin) -> tuple[str, ...]:
+        path_w = int(self._tree.column("path", "width") or 180)
+        return (
+            plugin.name,
+            plugin.developer,
+            plugin.version,
+            plugin.fmt,
+            plugin.file_size_human,
+            plugin.modified,
+            truncate_for_column(plugin.path, path_w),
+        )
+
+    def _refresh_path_cells(self) -> None:
+        if not self._iid_to_plugin:
+            return
+        path_w = int(self._tree.column("path", "width") or 180)
+        for iid, plugin in self._iid_to_plugin.items():
+            values = list(self._tree.item(iid, "values"))
+            if len(values) >= 7:
+                values[6] = truncate_for_column(plugin.path, path_w)
+                self._tree.item(iid, values=values)
 
     def _populate_table(self, plugins: list[Plugin]) -> None:
         self._clear_table()
         for i, p in enumerate(plugins):
             tags = ["even" if i % 2 == 0 else "odd", f"fmt_{p.fmt}"]
-            self._tree.insert("", "end", values=p.row, tags=tags)
+            iid = self._tree.insert("", "end", values=self._plugin_row_values(p), tags=tags)
+            self._iid_to_plugin[iid] = p
 
         if plugins:
             self._empty_label.grid_remove()
         else:
             self._empty_label.configure(text="No results match your search.")
             self._empty_label.grid()
+
+        if hasattr(self, "_relayout_tree_columns"):
+            self.after_idle(self._relayout_tree_columns)
 
     # ── Search ────────────────────────────────────────────────────────────────
 
@@ -393,7 +451,8 @@ class PluginScannerView(ctk.CTkFrame):
         selected = self._tree.selection()
         if not selected:
             return
-        path = self._tree.item(selected[0], "values")[6]
+        plugin = self._iid_to_plugin.get(selected[0])
+        path = plugin.path if plugin else self._tree.item(selected[0], "values")[6]
         if path:
             subprocess.run(["open", "-R", path], check=False)
 

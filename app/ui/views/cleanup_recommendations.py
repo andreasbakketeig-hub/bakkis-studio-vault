@@ -17,6 +17,9 @@ from app.core.cleanup import (
     CONF_UNKNOWN,
     DAW_PROFILES,
     PROFILE_ABLETON,
+    PROFILE_CUBASE,
+    PROFILE_LOGIC,
+    PROFILE_PRO_TOOLS,
     PROFILE_CUSTOM,
     CleanupRecommendation,
     DawProfile,
@@ -25,6 +28,20 @@ from app.core.cleanup import (
     make_custom_profile,
 )
 from app.core.scanner import Plugin, _fmt_size
+
+# ── DAW → profile key mapping ─────────────────────────────────────────────────
+_DAW_PROFILE_MAP: dict[str, str] = {
+    "Logic Pro":     PROFILE_LOGIC,
+    "GarageBand":    PROFILE_LOGIC,
+    "Pro Tools":     PROFILE_PRO_TOOLS,
+    "Cubase":        PROFILE_CUBASE,
+    "Studio One":    PROFILE_CUBASE,
+    "Ableton Live":  PROFILE_ABLETON,
+    "FL Studio":     PROFILE_ABLETON,
+    "Bitwig Studio": PROFILE_ABLETON,
+    "Reaper":        PROFILE_ABLETON,
+    "Reason":        PROFILE_ABLETON,
+}
 
 # ── Design System ─────────────────────────────────────────────────────────────
 BG_CARD          = "#131720"
@@ -87,22 +104,35 @@ _ROW_STATUS  = 5
 class CleanupRecommendationsView(ctk.CTkFrame):
     """Cleanup Recommendations — read-only analysis of plugin format redundancy."""
 
-    def __init__(self, parent: ctk.CTkFrame, **kwargs):
+    def __init__(self, parent: ctk.CTkFrame, settings=None, **kwargs):
         super().__init__(parent, fg_color="transparent", **kwargs)
 
         self._plugins: list[Plugin] = []
         self._recs: list[CleanupRecommendation] = []
         self._active_filter: str = FILTER_ALL
-        self._active_profile_key: str = PROFILE_ABLETON
         self._filter_btns: dict[str, ctk.CTkButton] = {}
         self._profile_btns: dict[str, ctk.CTkButton] = {}
         self._iid_to_rec: dict[str, CleanupRecommendation] = {}
 
+        # ── Derive initial state from settings ────────────────────────────────
+        self._safe_mode: bool = settings.safe_mode_cleanup if settings else True
+        self._accent: str = (settings.accent_color if settings else None) or ACCENT
+
+        # Determine initial profile from preferred_daw
+        preferred_daw = settings.preferred_daw if settings else ""
+        if preferred_daw in _DAW_PROFILE_MAP:
+            self._active_profile_key = _DAW_PROFILE_MAP[preferred_daw]
+        elif preferred_daw and preferred_daw not in ("", "Other"):
+            # Unknown DAW — use custom profile with preferred_formats
+            self._active_profile_key = PROFILE_CUSTOM
+        else:
+            self._active_profile_key = PROFILE_ABLETON
+
+        # Custom format vars — initialised from preferred_formats when available
+        preferred_formats = settings.preferred_formats if settings else ["VST3", "AU"]
         self._custom_vars: dict[str, tk.BooleanVar] = {
-            "VST3": tk.BooleanVar(value=True),
-            "AU":   tk.BooleanVar(value=True),
-            "VST":  tk.BooleanVar(value=False),
-            "AAX":  tk.BooleanVar(value=False),
+            fmt: tk.BooleanVar(value=fmt in preferred_formats)
+            for fmt in _CUSTOM_FMT_ORDER
         }
 
         self._build()
@@ -180,7 +210,7 @@ class CleanupRecommendationsView(ctk.CTkFrame):
                 height=30,
                 corner_radius=8,
                 font=ctk.CTkFont(size=12),
-                fg_color=ACCENT if is_active else BG_CARD_INNER,
+                fg_color=self._accent if is_active else BG_CARD_INNER,
                 hover_color=ACCENT_HOVER if is_active else BORDER_BRIGHT,
                 text_color=TEXT_PRIMARY if is_active else TEXT_MUTED,
                 border_width=1,
@@ -189,6 +219,17 @@ class CleanupRecommendationsView(ctk.CTkFrame):
             )
             btn.pack(side="left", padx=(0, 6))
             self._profile_btns[profile.key] = btn
+
+        # Safe Mode badge — shown when safe_mode_cleanup is on
+        if self._safe_mode:
+            safe_badge = ctk.CTkFrame(btn_row, fg_color="#2A1E08", corner_radius=6)
+            safe_badge.pack(side="left", padx=(8, 0))
+            ctk.CTkLabel(
+                safe_badge,
+                text="⚠  Safe Mode",
+                font=ctk.CTkFont(size=10, weight="bold"),
+                text_color=ACCENT_WARN,
+            ).pack(padx=8, pady=4)
 
         self._profile_desc_label = ctk.CTkLabel(
             card,
@@ -277,7 +318,7 @@ class CleanupRecommendationsView(ctk.CTkFrame):
                 height=32,
                 corner_radius=9,
                 font=ctk.CTkFont(size=12),
-                fg_color=ACCENT if is_active else BG_CARD,
+                fg_color=self._accent if is_active else BG_CARD,
                 hover_color=ACCENT_HOVER if is_active else BORDER_BRIGHT,
                 text_color=TEXT_PRIMARY if is_active else TEXT_MUTED,
                 border_width=1,
@@ -417,7 +458,7 @@ class CleanupRecommendationsView(ctk.CTkFrame):
         for key, btn in self._profile_btns.items():
             active = key == self._active_profile_key
             btn.configure(
-                fg_color=ACCENT if active else BG_CARD_INNER,
+                fg_color=self._accent if active else BG_CARD_INNER,
                 hover_color=ACCENT_HOVER if active else BORDER_BRIGHT,
                 text_color=TEXT_PRIMARY if active else TEXT_MUTED,
             )
@@ -477,6 +518,17 @@ class CleanupRecommendationsView(ctk.CTkFrame):
             return
 
         self._recs = analyze_cleanup(self._plugins, profile)
+
+        # Safe Mode: downgrade all CONF_SAFE → CONF_REVIEW so nothing is
+        # flagged as definitively safe without an explicit user override.
+        if self._safe_mode:
+            from dataclasses import replace as _dc_replace
+            self._recs = [
+                _dc_replace(r, confidence=CONF_REVIEW)
+                if r.confidence == CONF_SAFE else r
+                for r in self._recs
+            ]
+
         self._active_filter = FILTER_ALL
         self._update_filter_buttons()
         self._update_stat_cards()
@@ -493,7 +545,7 @@ class CleanupRecommendationsView(ctk.CTkFrame):
         for key, btn in self._filter_btns.items():
             active = key == self._active_filter
             btn.configure(
-                fg_color=ACCENT if active else BG_CARD,
+                fg_color=self._accent if active else BG_CARD,
                 hover_color=ACCENT_HOVER if active else BORDER_BRIGHT,
                 text_color=TEXT_PRIMARY if active else TEXT_MUTED,
             )

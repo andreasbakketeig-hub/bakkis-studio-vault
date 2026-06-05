@@ -349,3 +349,9 @@ class Sidebar(ctk.CTkFrame):
     def activate(self, key: str) -> None:
         """Highlight *key* as active without triggering the navigation callback."""
         self._set_active(key)
+
+    def update_accent(self, color: str) -> None:
+        """Apply a new accent color to the active nav indicator immediately."""
+        key = self._active_key
+        if key and key in self._indicators:
+            self._indicators[key].configure(bg=color)

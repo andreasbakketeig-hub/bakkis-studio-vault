@@ -70,7 +70,10 @@ class HealthReport:
 
 # ── Analyzer ──────────────────────────────────────────────────────────────────
 
-def analyze_health(plugins: list[Plugin]) -> HealthReport:
+def analyze_health(
+    plugins: list[Plugin],
+    vst2_sensitivity: str = "Medium",
+) -> HealthReport:
     """
     Inspect *plugins* for potential issues and return a :class:`HealthReport`.
 
@@ -82,6 +85,11 @@ def analyze_health(plugins: list[Plugin]) -> HealthReport:
       5. Legacy VST2 format (deprecated on macOS) / unknown formats
       6. Duplicate plugin names across formats
       7. Identical name + format found in multiple file-system locations
+
+    vst2_sensitivity controls VST2 flagging:
+      - "Low"    : only flag VST2 when a VST3 or AU equivalent exists
+      - "Medium" : always flag VST2 as a warning  (default)
+      - "High"   : flag all VST2 plugins as broken (most aggressive)
     """
     report = HealthReport(total_plugins=len(plugins))
     if not plugins:
@@ -164,15 +172,43 @@ def analyze_health(plugins: list[Plugin]) -> HealthReport:
                 suggested_action="File extension does not match reported format — check installation",
             ))
         elif p.fmt == "VST":
-            # VST2 is deprecated on macOS; modern DAWs are dropping support
-            report.issues.append(HealthIssue(
-                plugin_name=p.name,
-                issue_type="Legacy Format (VST2)",
-                category=CAT_WARNING,
-                fmt=p.fmt,
-                path=p.path,
-                suggested_action="VST2 is deprecated on macOS — check for a VST3 or AU version",
-            ))
+            # VST2 flagging — behaviour controlled by vst2_sensitivity
+            group = name_groups.get(p.name.lower().strip(), [])
+            has_modern = any(
+                q.fmt in ("VST3", "AU") for q in group if q.path != p.path
+            )
+
+            if vst2_sensitivity == "Low":
+                # Only flag when a modern equivalent is also installed
+                if has_modern:
+                    report.issues.append(HealthIssue(
+                        plugin_name=p.name,
+                        issue_type="Legacy Format (VST2)",
+                        category=CAT_WARNING,
+                        fmt=p.fmt,
+                        path=p.path,
+                        suggested_action="VST3/AU equivalent found — safe to remove VST2 copy",
+                    ))
+            elif vst2_sensitivity == "High":
+                # Flag all VST2 as broken regardless of alternatives
+                report.issues.append(HealthIssue(
+                    plugin_name=p.name,
+                    issue_type="Legacy Format (VST2) — High Sensitivity",
+                    category=CAT_BROKEN,
+                    fmt=p.fmt,
+                    path=p.path,
+                    suggested_action="VST2 is deprecated — upgrade to VST3 or AU immediately",
+                ))
+            else:
+                # Medium (default): always flag as warning
+                report.issues.append(HealthIssue(
+                    plugin_name=p.name,
+                    issue_type="Legacy Format (VST2)",
+                    category=CAT_WARNING,
+                    fmt=p.fmt,
+                    path=p.path,
+                    suggested_action="VST2 is deprecated on macOS — check for a VST3 or AU version",
+                ))
 
     # ── 6 & 7. Duplicate detection ────────────────────────────────────────────
     for _, group in name_groups.items():

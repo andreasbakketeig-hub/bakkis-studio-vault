@@ -71,7 +71,7 @@ _TAG_STATUS = {
 class MigrationAssistantView(ctk.CTkFrame):
     """Root frame for the Migration Assistant module."""
 
-    def __init__(self, parent: ctk.CTkFrame, **kwargs):
+    def __init__(self, parent: ctk.CTkFrame, settings=None, **kwargs):
         super().__init__(parent, fg_color="transparent", **kwargs)
         self.grid_rowconfigure(1, weight=1)
         self.grid_columnconfigure(0, weight=1)
@@ -83,6 +83,17 @@ class MigrationAssistantView(ctk.CTkFrame):
         self._current_apps: list[MusicApp] = []
         self._scanning = False
         self._report_widgets: list[tk.Widget | ctk.CTkBaseClass] = []
+
+        # Settings-derived values
+        self._machine_name: str = settings.machine_display_name if settings else ""
+        self._machine_role: str = settings.machine_role if settings else ""
+        self._comparison_behavior: str = (
+            settings.comparison_behavior if settings else "Match by name"
+        )
+        self._readiness_threshold: int = (
+            settings.migration_readiness_threshold if settings else 80
+        )
+        self._snapshot_folder: str = settings.snapshot_export_folder if settings else ""
 
         self._build()
 
@@ -117,6 +128,22 @@ class MigrationAssistantView(ctk.CTkFrame):
             text_color=ACCENT,
             anchor="w",
         ).pack(side="left", padx=(14, 0))
+
+        # Machine identity badge
+        machine_parts: list[str] = []
+        if self._machine_name:
+            machine_parts.append(self._machine_name)
+        if self._machine_role:
+            machine_parts.append(self._machine_role)
+        if machine_parts:
+            badge = ctk.CTkFrame(hdr, fg_color=BTN_SEC, corner_radius=8)
+            badge.pack(side="right")
+            ctk.CTkLabel(
+                badge,
+                text="  ⬢  " + "  ·  ".join(machine_parts) + "  ",
+                font=ctk.CTkFont(size=11),
+                text_color=TEXT_SECONDARY,
+            ).pack(padx=4, pady=6)
 
     def _build_tabs(self) -> None:
         self._tabview = ctk.CTkTabview(
@@ -683,7 +710,12 @@ class MigrationAssistantView(ctk.CTkFrame):
             upd("Scanning music applications…")
             self._current_apps = scan_music_apps(progress_cb=upd)
 
-            self._snapshot = create_snapshot(self._current_plugins, self._current_apps)
+            self._snapshot = create_snapshot(
+                self._current_plugins,
+                self._current_apps,
+                machine_name=self._machine_name,
+                machine_role=self._machine_role,
+            )
             self.after(0, self._on_scan_complete)
         except Exception as exc:
             self.after(0, lambda e=exc: self._on_scan_error(str(e)))
@@ -750,10 +782,16 @@ class MigrationAssistantView(ctk.CTkFrame):
     # =========================================================================
 
     def _load_reference_snapshot(self) -> None:
+        from pathlib import Path as _Path
+        initial_dir = (
+            self._snapshot_folder
+            if self._snapshot_folder and _Path(self._snapshot_folder).is_dir()
+            else str(Path.home() / "Desktop")
+        )
         path = filedialog.askopenfilename(
             title="Load Reference Snapshot (from old Mac)",
             filetypes=[("JSON Snapshot", "*.json"), ("All Files", "*.*")],
-            initialdir=str(Path.home() / "Desktop"),
+            initialdir=initial_dir,
         )
         if not path:
             return
@@ -790,6 +828,7 @@ class MigrationAssistantView(ctk.CTkFrame):
             self._reference,
             self._current_plugins,
             self._current_apps,
+            comparison_behavior=self._comparison_behavior,
         )
         self._refresh_compare_tab()
         self._refresh_dashboard_tab()
@@ -844,11 +883,23 @@ class MigrationAssistantView(ctk.CTkFrame):
         self._dash_pcts["missing"].configure(text=f"{miss_p * 100:.0f}%")
         self._dash_pcts["review"].configure(text=f"{rev_p * 100:.0f}%")
 
+        # Readiness verdict based on threshold from settings
+        installed_pct = int(inst_p * 100)
+        threshold = self._readiness_threshold
+        if installed_pct >= threshold:
+            verdict = f"✓ Migration Ready  ({installed_pct}% ≥ {threshold}% threshold)"
+            verdict_color = SUCCESS
+        else:
+            verdict = f"✗ Not Ready  ({installed_pct}% < {threshold}% threshold)"
+            verdict_color = DANGER
+
         self._dash_info.configure(
             text=(
-                f"Migration progress: {cmp.installed_count}/{total} items restored  ·  "
+                f"{verdict}  ·  "
+                f"{cmp.installed_count}/{total} items  ·  "
                 f"{cmp.missing_count} missing  ·  {cmp.review_count} needs review"
-            )
+            ),
+            text_color=verdict_color,
         )
 
         for row in self._dash_tree.get_children():
@@ -873,12 +924,25 @@ class MigrationAssistantView(ctk.CTkFrame):
     # Export actions
     # =========================================================================
 
+    def _resolve_export_dest(self, filename: str) -> "Path | None":
+        """Return export Path, using snapshot_export_folder from settings if set."""
+        from pathlib import Path
+        import datetime
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        base = filename.format(ts=ts)
+        if self._snapshot_folder:
+            folder = Path(self._snapshot_folder)
+            if folder.is_dir():
+                return folder / base
+        return None  # let the core function use its default (Desktop)
+
     def _export_json(self) -> None:
         if not self._snapshot:
             messagebox.showinfo("No Snapshot", "Create a snapshot first.")
             return
         try:
-            path = save_snapshot_json(self._snapshot)
+            dest = self._resolve_export_dest("studio_snapshot_{ts}.json")
+            path = save_snapshot_json(self._snapshot, dest=dest)
             messagebox.showinfo("Saved", f"JSON snapshot saved to:\n{path}")
         except Exception as exc:
             messagebox.showerror("Export Error", str(exc))
@@ -888,7 +952,8 @@ class MigrationAssistantView(ctk.CTkFrame):
             messagebox.showinfo("No Snapshot", "Create a snapshot first.")
             return
         try:
-            path = export_migration_csv(self._snapshot)
+            dest = self._resolve_export_dest("migration_report_{ts}.csv")
+            path = export_migration_csv(self._snapshot, dest=dest)
             messagebox.showinfo("Saved", f"CSV report saved to:\n{path}")
         except Exception as exc:
             messagebox.showerror("Export Error", str(exc))
@@ -898,7 +963,8 @@ class MigrationAssistantView(ctk.CTkFrame):
             messagebox.showinfo("No Snapshot", "Create a snapshot first.")
             return
         try:
-            path = export_migration_html(self._snapshot)
+            dest = self._resolve_export_dest("migration_report_{ts}.html")
+            path = export_migration_html(self._snapshot, dest=dest)
             try:
                 subprocess.Popen(["open", str(path)])
             except Exception:

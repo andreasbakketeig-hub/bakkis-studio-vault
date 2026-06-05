@@ -68,10 +68,17 @@ ACCENT_SWATCHES: list[tuple[str, str]] = [
 class SettingsView(ctk.CTkFrame):
     """Full settings control center with six tabbed sections."""
 
-    def __init__(self, parent: ctk.CTkFrame, db: "Database", **kwargs) -> None:
+    def __init__(
+        self,
+        parent: ctk.CTkFrame,
+        db: "Database",
+        on_settings_saved=None,
+        **kwargs,
+    ) -> None:
         super().__init__(parent, fg_color="transparent", **kwargs)
 
         self._db = db
+        self._on_settings_saved = on_settings_saved
 
         from app.db.repositories.settings import SettingsRepository
         from app.db.repositories.plugins import PluginRepository
@@ -962,6 +969,9 @@ class SettingsView(ctk.CTkFrame):
         s.theme_preset       = self._theme_preset_var.get()
 
         s.save(self._settings_repo)
+
+        if self._on_settings_saved:
+            self._on_settings_saved(s)
 
         self._save_status.configure(text="✓  Settings saved", text_color=ACCENT_GREEN)
         self.after(2500, lambda: self._save_status.configure(text=""))
