@@ -12,6 +12,12 @@ from tkinter import ttk
 import customtkinter as ctk
 
 from app.core.scanner import FormatGroup, Plugin, analyze_formats
+from app.ui.tree_columns import (
+    FixedColumn,
+    FlexColumn,
+    TreeColumnLayout,
+    bind_responsive_tree_columns,
+)
 
 # ── Design System ─────────────────────────────────────────────────────────────
 BG_CARD          = "#131720"
@@ -37,6 +43,21 @@ FMT_COLORS: dict[str, str] = {
     "AU":   "#60A5FA",
     "AAX":  "#A855F7",
 }
+
+# Responsive split: name 30%, developer 24%, formats 22%;
+# copies 6%, total_size 9%, redundant 9% (fixed compact columns).
+_ANALYSIS_COLUMNS = TreeColumnLayout(
+    fixed=(
+        FixedColumn("count", 64, "center"),
+        FixedColumn("total_size", 96, "e"),
+        FixedColumn("redundant", 96, "e"),
+    ),
+    flex=(
+        FlexColumn("name", weight=30.0, min_width=120, anchor="w"),
+        FlexColumn("developer", weight=24.0, min_width=100, anchor="w"),
+        FlexColumn("formats", weight=22.0, min_width=180, anchor="w"),
+    ),
+)
 
 
 class FormatAnalysisView(ctk.CTkFrame):
@@ -128,6 +149,7 @@ class FormatAnalysisView(ctk.CTkFrame):
         bar = ctk.CTkFrame(self, fg_color="transparent")
         bar.grid(row=2, column=0, sticky="ew", padx=30, pady=(14, 0))
         bar.grid_columnconfigure(0, weight=1)
+        bar.grid_columnconfigure(1, weight=0)
 
         self._reveal_btn = ctk.CTkButton(
             bar,
@@ -144,33 +166,39 @@ class FormatAnalysisView(ctk.CTkFrame):
             command=self._reveal_in_finder,
             state="disabled",
         )
-        self._reveal_btn.grid(row=0, column=1, sticky="e")
+        self._reveal_btn.grid(row=0, column=1, sticky="e", padx=(12, 0))
 
     def _build_table(self) -> None:
-        container = ctk.CTkFrame(
+        self._table_container = ctk.CTkFrame(
             self, fg_color=BG_CARD, corner_radius=14,
             border_width=1, border_color=BORDER,
         )
-        container.grid(row=3, column=0, sticky="nsew", padx=30, pady=(14, 0))
-        container.grid_rowconfigure(2, weight=1)
-        container.grid_columnconfigure(0, weight=1)
+        self._table_container.grid(row=3, column=0, sticky="nsew", padx=30, pady=(14, 0))
+        self._table_container.grid_rowconfigure(2, weight=1)
+        self._table_container.grid_columnconfigure(0, weight=1)
+        container = self._table_container
 
-        # Legend
+        # Legend — grid keeps format badges aligned without crowding the table
         legend = ctk.CTkFrame(container, fg_color="transparent")
         legend.grid(row=0, column=0, sticky="ew", padx=18, pady=(12, 0))
+        legend.grid_columnconfigure(0, weight=1)
 
+        legend_left = ctk.CTkFrame(legend, fg_color="transparent")
+        legend_left.grid(row=0, column=0, sticky="w")
         ctk.CTkLabel(
-            legend, text="⬥  Multiple formats installed",
+            legend_left, text="⬥  Multiple formats installed",
             font=ctk.CTkFont(size=10), text_color=ACCENT_WARN,
         ).pack(side="left")
         ctk.CTkLabel(
-            legend, text="    Single format",
+            legend_left, text="    Single format",
             font=ctk.CTkFont(size=10), text_color=TEXT_MUTED,
         ).pack(side="left")
 
-        for fmt, color in FMT_COLORS.items():
-            badge = ctk.CTkFrame(legend, fg_color=BORDER_BRIGHT, corner_radius=5)
-            badge.pack(side="right", padx=(4, 0))
+        badge_row = ctk.CTkFrame(legend, fg_color="transparent")
+        badge_row.grid(row=0, column=1, sticky="e")
+        for i, (fmt, color) in enumerate(FMT_COLORS.items()):
+            badge = ctk.CTkFrame(badge_row, fg_color=BORDER_BRIGHT, corner_radius=5)
+            badge.grid(row=0, column=i, padx=(4 if i else 0, 0))
             ctk.CTkLabel(
                 badge, text=fmt,
                 font=ctk.CTkFont(size=9, weight="bold"), text_color=color,
@@ -218,17 +246,15 @@ class FormatAnalysisView(ctk.CTkFrame):
             style="Analysis.Treeview",
             selectmode="browse",
         )
-        col_cfg = [
-            ("name",      "PRODUCT NAME",        220, True,  "w"),
-            ("developer", "DEVELOPER",            160, True,  "w"),
-            ("formats",   "FORMATS INSTALLED",    200, True,  "w"),
-            ("count",     "COPIES",                60, False, "center"),
-            ("total_size","TOTAL SIZE",             90, False, "e"),
-            ("redundant", "REDUNDANT",              90, False, "e"),
-        ]
-        for col_id, heading, width, stretch, anchor in col_cfg:
+        for col_id, heading in (
+            ("name", "PRODUCT NAME"),
+            ("developer", "DEVELOPER"),
+            ("formats", "FORMATS INSTALLED"),
+            ("count", "COPIES"),
+            ("total_size", "TOTAL SIZE"),
+            ("redundant", "REDUNDANT"),
+        ):
             self._tree.heading(col_id, text=heading)
-            self._tree.column(col_id, width=width, minwidth=50, stretch=stretch, anchor=anchor)
 
         vsb = ttk.Scrollbar(tree_frame, orient="vertical", command=self._tree.yview)
         self._tree.configure(yscrollcommand=vsb.set)
@@ -241,6 +267,13 @@ class FormatAnalysisView(ctk.CTkFrame):
         self._tree.tag_configure("single_odd",  background=BG_TABLE_ROW_ALT,     foreground=TEXT_PRIMARY)
 
         self._tree.bind("<<TreeviewSelect>>", self._on_tree_select)
+
+        self._relayout_tree_columns = bind_responsive_tree_columns(
+            self._tree,
+            tree_frame,
+            _ANALYSIS_COLUMNS,
+            extra_hosts=(container, self),
+        )
 
         self._empty_label = ctk.CTkLabel(
             container, text="",
@@ -357,6 +390,9 @@ class FormatAnalysisView(ctk.CTkFrame):
                 f"Preferred [{pref_label}]: {covered:,} / {total_products:,} products covered"
             )
         )
+
+        if hasattr(self, "_relayout_tree_columns"):
+            self.after_idle(self._relayout_tree_columns)
 
     # ── Reveal in Finder ──────────────────────────────────────────────────────
 
