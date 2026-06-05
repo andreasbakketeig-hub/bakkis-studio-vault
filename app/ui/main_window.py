@@ -104,28 +104,38 @@ class MainWindow(ctk.CTk):
         if key not in self._views:
             self._views[key] = self._create_view(key)
 
-        self._views[key].grid(row=0, column=0, sticky="nsew")
+        view = self._views[key]
+        view.grid(row=0, column=0, sticky="nsew")
         self._active_key = key
         self._sidebar.activate(key)
+
+        if hasattr(view, "refresh_db_stats"):
+            view.refresh_db_stats()
 
     # ── Scan callbacks ────────────────────────────────────────────────────────
 
     def _on_plugins_ready(self, plugins: list[Plugin]) -> None:
         """Called by PluginScannerView when a scan completes."""
         self._plugins = plugins
-        # Persist to DB (the view already saved its own copy, but we also update
-        # the timestamp so the main window has the latest context)
-        self._plugin_scan_ts = None  # view handles its own timestamp display
+        self._plugin_repo.save_scan(plugins)
 
         for key in ("studio_overview", "format_analysis", "plugin_health", "cleanup", "migration"):
             if key in self._views:
                 self._views[key].refresh(plugins)  # type: ignore[union-attr]
 
+        if "settings" in self._views:
+            self._views["settings"].refresh_db_stats()  # type: ignore[union-attr]
+
     def _on_apps_ready(self, apps: list[MusicApp]) -> None:
         """Called by MusicSoftwareScannerView when a scan completes."""
         self._music_apps = apps
+        self._apps_repo.save_scan(apps)
+
         if "studio_overview" in self._views:
             self._views["studio_overview"].refresh_apps(apps)  # type: ignore[union-attr]
+
+        if "settings" in self._views:
+            self._views["settings"].refresh_db_stats()  # type: ignore[union-attr]
 
     # ── View factory ──────────────────────────────────────────────────────────
 

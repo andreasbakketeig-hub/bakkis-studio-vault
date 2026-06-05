@@ -207,6 +207,10 @@ class SettingsView(ctk.CTkFrame):
         if key in self._tab_scrolls:
             self._tab_scrolls[key].grid()
 
+        if key == "database":
+            self._refresh_stats()
+            self._db_size_label.configure(text=self._get_db_size_str())
+
     # ── Content area ──────────────────────────────────────────────────────────
 
     def _build_content_area(self) -> None:
@@ -877,6 +881,13 @@ class SettingsView(ctk.CTkFrame):
             font=ctk.CTkFont(size=11), text_color=TEXT_MUTED,
             justify="left",
         ).pack(anchor="w", padx=16, pady=(4, 16))
+
+    # ── Public API ────────────────────────────────────────────────────────────
+
+    def refresh_db_stats(self) -> None:
+        """Refresh session counts and DB size. Called by MainWindow after a scan."""
+        self._refresh_stats()
+        self._db_size_label.configure(text=self._get_db_size_str())
 
     # ── Save / Reset row ──────────────────────────────────────────────────────
 
