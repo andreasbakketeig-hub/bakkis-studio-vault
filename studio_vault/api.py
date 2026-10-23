@@ -25,7 +25,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Callable, Protocol
 
-from studio_vault import APP_NAME, __version__, checklist, config, leave, report
+from studio_vault import APP_NAME, __version__, checklist, config, leave, projects, report
 from studio_vault import snapshot as snap
 from studio_vault.compare import compare, compare_versions, side_by_side
 from studio_vault.scanners.apps import scan_music_apps
@@ -52,6 +52,7 @@ class Native(Protocol):
     def choose_open_file(self, file_types: tuple[str, ...]) -> str | None: ...
     def choose_save_file(self, default_name: str, file_types: tuple[str, ...]) -> str | None: ...
     def choose_folder(self) -> str | None: ...
+    def choose_open_files(self, file_types: tuple[str, ...]) -> list[str]: ...
     def reveal_in_finder(self, path: str) -> None: ...
     def open_url(self, url: str) -> None: ...
     def move_to_trash(self, path: str) -> None: ...
@@ -90,6 +91,10 @@ class Api:
         self._current: snap.Snapshot | None = None       # last scan of this Mac (maybe unsaved)
         self._current_saved_id: str = ""
         self._changes: dict | None = None                # current vs previous snapshot of this Mac
+        self._projects: list[projects.Project] = []
+        self._projects_job: dict[str, Any] = {"status": SCAN_IDLE, "done": 0, "total": 0, "source": ""}
+        self._projects_thread: threading.Thread | None = None
+        self._projects_cancel = threading.Event()
         config.ensure_data_dirs()
         if not self._settings.legacy_import_done:
             snap.import_legacy()
@@ -484,6 +489,88 @@ class Api:
         checklist.set_done(leave.LEAVE_ID, item_id, bool(done))
         return self.leave_list()
 
+    # ── project check (Ableton Live) ──────────────────────────────────────────
+
+    def projects_choose_files(self) -> dict:
+        def run() -> dict:
+            paths = self._require_native().choose_open_files(("Ableton Live Set (*.als)",))
+            if not paths:
+                return _ok(cancelled=True)
+            return self.projects_check_paths(list(paths))
+        return self._guard(run)
+
+    def projects_choose_folder(self) -> dict:
+        def run() -> dict:
+            folder = self._require_native().choose_folder()
+            if not folder:
+                return _ok(cancelled=True)
+            return self._start_projects(folder=folder)
+        return self._guard(run)
+
+    def projects_check_paths(self, paths: list[str]) -> dict:
+        als = [p for p in paths if str(p).lower().endswith(".als")]
+        if not als:
+            return _fail("Choose Ableton Live Sets (.als files).")
+        return self._start_projects(paths=als)
+
+    def projects_cancel(self) -> dict:
+        self._projects_cancel.set()
+        return _ok()
+
+    def _start_projects(self, paths: list[str] | None = None, folder: str = "") -> dict:
+        with self._lock:
+            if self._projects_job["status"] == SCAN_RUNNING:
+                return _fail("Already checking projects.")
+            self._projects_cancel.clear()
+            label = snap.scrub_path(folder) if folder else f"{len(paths or [])} project file(s)"
+            self._projects_job = {"status": SCAN_RUNNING, "done": 0, "total": 0, "source": label}
+            self._projects_thread = threading.Thread(
+                target=self._run_projects, args=(paths, folder), name="projects", daemon=True)
+            self._projects_thread.start()
+            return _ok(job=dict(self._projects_job))
+
+    def _run_projects(self, paths: list[str] | None, folder: str) -> None:
+        def progress(done: int, total: int) -> None:
+            with self._lock:
+                self._projects_job.update(done=done, total=total)
+                data = dict(self._projects_job)
+            self._emit("projects", data)
+        try:
+            files = [Path(p) for p in paths] if paths else projects.find_projects(folder)
+            progress(0, len(files))
+            parsed = projects.parse_many(files, progress, self._projects_cancel.is_set)
+            status = SCAN_CANCELLED if self._projects_cancel.is_set() else SCAN_DONE
+            with self._lock:
+                self._projects = parsed
+                self._projects_job["status"] = status
+                data = dict(self._projects_job)
+        except Exception as exc:  # noqa: BLE001 - report, never crash the worker
+            with self._lock:
+                self._projects_job.update(status=SCAN_FAILED, error=f"Could not check projects: {exc}")
+                data = dict(self._projects_job)
+        self._emit("projects", data)
+
+    def projects_result(self, target_id: str = "") -> dict:
+        """The checked projects against this Mac (default) or a snapshot."""
+        def run() -> dict:
+            target = self._load(target_id) if target_id else self._this_mac_state()
+            with self._lock:
+                parsed = list(self._projects)
+                job = dict(self._projects_job)
+            checks = projects.check_all([p for p in parsed if not p.error], target)
+            return _ok(
+                job=job,
+                target={"id": target_id or "this-mac", "name": target.name, "created_at": target.created_at},
+                projects=[{
+                    "name": c.project.name, "path": c.project.path, "live_version": c.project.live_version,
+                    "missing": c.missing, "total": len(c.plugins),
+                    "plugins": [asdict(p) for p in c.plugins],
+                } for c in checks],
+                unreadable=[{"name": p.name, "path": p.path, "error": p.error} for p in parsed if p.error],
+                missing=projects.missing_summary(checks),
+            )
+        return self._guard(run)
+
     def export_checklist(self, source_id: str, fmt: str = "html") -> dict:
         def run() -> dict:
             source = self._load(source_id)
@@ -542,6 +629,7 @@ class Api:
 
     def _shutdown(self) -> None:
         self._cancel.set()
+        self._projects_cancel.set()
         thread = self._scan_thread
         if thread is not None:
             thread.join(timeout=2)

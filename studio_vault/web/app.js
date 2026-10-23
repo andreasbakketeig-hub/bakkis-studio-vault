@@ -15,6 +15,7 @@ const ui = {
   studioChanges: null,
   newmac: { mode: "new", sourceId: "", data: null, filter: "missing", q: "", open: new Set(), leave: null },
   cmp: { a: "", b: "", data: null, filter: "diff", q: "", open: new Set() },
+  proj: { target: "", data: null, job: null, filter: "need", q: "", limit: 100 },
   inv: { id: "", data: null, tab: "plugins", q: "", fmt: "", kind: "", vendor: "", arch: "", sort: "name", dir: 1 },
   about: null,
 };
@@ -153,6 +154,7 @@ document.querySelectorAll(".nav").forEach((b) => b.addEventListener("click", () 
 function render() {
   if (ui.view === "studio") renderStudio();
   else if (ui.view === "compare") loadCompare();
+  else if (ui.view === "projects") loadProjects();
   else if (ui.view === "snapshots") renderSnapshots();
   else if (ui.view === "newmac") loadNewMac();
   else if (ui.view === "inventory") loadInventory();
@@ -508,6 +510,111 @@ function renderCompare() {
     if (hw.length) cards.push(el("section", { class: "card group" }, el("div", { class: "group-head" }, el("h2", {}, "Hardware")), header(), hw.map(row)));
     if (!cards.length) cards.push(el("div", { class: "empty" }, q ? "Nothing matches." : (c.filter === "diff" ? "No differences. These two are in sync." : "None.")));
     $("#cmp-groups").replaceChildren(...cards);
+  }
+}
+
+// ── Projects (Ableton Live) ──────────────────────────────────────────────────
+
+async function loadProjects() {
+  const P = ui.proj;
+  const valid = !P.target || P.target === "current" ? true : ui.snapshots.some((s) => s.id === P.target);
+  if (!valid) P.target = "";
+  const res = await api().projects_result(P.target);
+  P.data = res.ok ? res : null;
+  P.job = res.ok ? res.job : P.job;
+  renderProjects();
+}
+
+async function projectsStart(kind) {
+  const res = await call(kind === "folder" ? "projects_choose_folder" : "projects_choose_files");
+  if (res.ok && !res.cancelled) { ui.proj.job = res.job; renderProjects(); }
+}
+
+function renderProjects() {
+  const root = $("#view-projects");
+  const P = ui.proj;
+  const d = P.data;
+  const job = P.job || { status: "idle" };
+  const running = job.status === "running";
+  const head = el("div", { class: "head" },
+    el("div", {}, el("h1", {}, "Projects"), el("p", { class: "sub" }, "Will your Ableton Live projects open with all their plug-ins?")),
+    el("div", { class: "actions" },
+      el("button", { class: "btn", disabled: running, onclick: () => projectsStart("files") }, "Choose projects…"),
+      el("button", { class: "btn primary", disabled: running, onclick: () => projectsStart("folder") }, "Check a folder…")));
+  const targets = [["", "This Mac"]];
+  for (const s of ui.snapshots) if (!s.is_this_mac) targets.push([s.id, `${s.name} — ${fmtDate(s.created_at, false)}`]);
+  const parts = [head];
+  if (targets.length > 1) {
+    parts.push(el("div", { class: "card", style: "margin-top: 24px" }, el("div", { class: "pick" },
+      el("label", {}, "Check against", el("select", { class: "select", onchange: (e) => { P.target = e.target.value; loadProjects(); } },
+        targets.map(([v, t]) => el("option", { value: v, selected: P.target === v }, t)))))));
+  }
+  if (running) {
+    const pct = job.total ? Math.round(100 * job.done / job.total) : 0;
+    parts.push(el("div", { class: "card progress-line" },
+      el("div", { style: "display: flex; justify-content: space-between; font-size: var(--fs-s); margin-bottom: 8px" },
+        el("span", {}, `Reading ${job.source}`), el("span", { class: "muted" }, job.total ? `${num(job.done)} of ${num(job.total)}` : "Looking for projects…")),
+      el("div", { class: `meter${job.total ? "" : " indeterminate"}`, role: "progressbar", "aria-label": "Reading projects" }, el("div", { style: job.total ? `width: ${pct}%` : "" })),
+      el("div", { style: "text-align: right; margin-top: 8px" }, el("button", { class: "link", onclick: () => call("projects_cancel") }, "Cancel"))));
+  }
+  if (!d || (!d.projects.length && !d.unreadable.length)) {
+    if (!running) parts.push(el("div", { class: "empty", style: "margin-top: 28px" },
+      "Check a folder with your Live projects (subfolders included, Backup folders skipped), or drop .als files on the window. Projects are only read, never changed."));
+    root.replaceChildren(...parts);
+    return;
+  }
+  const need = d.projects.filter((p) => p.missing).length;
+  const stat = (key, n, text) => el("button", { class: P.filter === key ? "on" : "", "aria-pressed": String(P.filter === key),
+    onclick: () => { P.filter = key; P.limit = 100; renderProjects(); } }, el("b", {}, num(n)), el("small", {}, text));
+  parts.push(el("div", { class: "cmp-stats" },
+    stat("all", d.projects.length, `Projects checked against ${d.target.id === "this-mac" ? "this Mac" : d.target.name}`),
+    stat("ok", d.projects.length - need, "Open with every plug-in"),
+    stat("need", need, "Need plug-ins"),
+    stat("unreadable", d.unreadable.length, "Could not be read")));
+
+  if (d.missing.length && P.filter !== "unreadable") {
+    const statusText = (r) => r.status === "other_format" ? `Installed as ${r.have_formats.join(", ")}, project uses ${r.fmt}` : "Not installed";
+    parts.push(el("section", { class: "card group", style: "margin-top: 16px" },
+      el("div", { class: "group-head" }, el("h2", {}, "Missing across these projects"),
+        el("span", { class: "muted", style: "font-size: var(--fs-s)" }, plural(d.missing.length, "plug-in"))),
+      d.missing.slice(0, 15).map((r) => el("div", { class: "item" },
+        el("span", { class: "name" }, r.name, el("span", { class: "muted" }, ` · ${r.fmt}${r.vendor ? ` · ${r.vendor}` : ""}`),
+          el("span", { class: `st ${r.status}`, style: "display: block; font-weight: 400" }, statusText(r))),
+        el("span", { class: "muted", style: "font-size: var(--fs-s); white-space: nowrap" }, `in ${plural(r.projects, "project")}`))),
+      d.missing.length > 15 ? el("p", { class: "muted", style: "margin: 8px 0 0; font-size: var(--fs-s)" }, `And ${num(d.missing.length - 15)} more.`) : null));
+  }
+
+  parts.push(el("div", { class: "toolbar" }, el("span"),
+    el("label", { class: "search" }, searchIcon(), el("span", { class: "sr" }, "Search projects"),
+      el("input", { type: "search", placeholder: "Search projects or plug-ins", value: P.q, oninput: (e) => { P.q = e.target.value; P.limit = 100; renderList(); } }))));
+  const list = el("div", { id: "proj-list" });
+  parts.push(list);
+  root.replaceChildren(...parts);
+  renderList();
+
+  function renderList() {
+    const q = P.q.trim().toLowerCase();
+    const box = $("#proj-list");
+    if (P.filter === "unreadable") {
+      const rows = d.unreadable.filter((u) => !q || u.name.toLowerCase().includes(q));
+      box.replaceChildren(rows.length ? el("section", { class: "card group" }, rows.slice(0, P.limit).map((u) =>
+        el("div", { class: "item" }, el("span", { class: "name" }, u.name, el("span", { class: "muted", style: "display: block; font-size: var(--fs-s)" }, u.error))))) : el("div", { class: "empty" }, "None."));
+      return;
+    }
+    const rows = d.projects.filter((p) => (P.filter === "all" || (P.filter === "need" ? p.missing : !p.missing))
+      && (!q || p.name.toLowerCase().includes(q) || p.plugins.some((x) => x.name.toLowerCase().includes(q))));
+    const label = { missing: "Missing", other_format: "Other format", installed: "Installed" };
+    const cards = rows.slice(0, P.limit).map((p) => el("details", { class: "card proj" },
+      el("summary", {},
+        el("div", { class: "grow" }, el("b", {}, p.name), el("div", { class: "path", title: p.path }, p.path)),
+        p.live_version ? el("span", { class: "muted", style: "font-size: var(--fs-s)" }, `Live ${p.live_version}`) : null,
+        el("span", { class: p.missing ? "st missing" : "st installed" }, p.missing ? `${p.missing} of ${p.total} missing` : `All ${p.total} found`)),
+      el("div", { class: "body" }, p.plugins.length ? p.plugins.map((x) => el("div", { class: "item" },
+        el("span", { class: "name" }, x.name, el("span", { class: "muted" }, ` · ${x.fmt}${x.vendor ? ` · ${x.vendor}` : ""}`),
+          x.status === "other_format" ? el("span", { class: "warn-note" }, `Installed as ${x.have_formats.join(", ")}. Live needs the ${x.fmt} version or a swap in the project.`) : null),
+        el("span", { class: `st ${x.status}` }, label[x.status]))) : el("p", { class: "muted" }, "No third-party plug-ins."))));
+    if (rows.length > P.limit) cards.push(el("button", { class: "btn", onclick: () => { P.limit += 200; renderList(); } }, `Show ${num(Math.min(200, rows.length - P.limit))} more`));
+    box.replaceChildren(...(cards.length ? cards : [el("div", { class: "empty" }, q ? "Nothing matches." : "None.")]));
   }
 }
 
@@ -988,6 +1095,15 @@ window.vault = {
       ui.cmp.data = null;
       $("#welcome").classList.add("hidden");
       render();
+    } else if (event === "projects") {
+      ui.proj.job = data;
+      if (data.status !== "running") {
+        if (data.status === "failed") toast(data.error, "error");
+        if (ui.view === "projects") loadProjects();
+        if (data.status === "done") toast("Projects checked.");
+      } else if (ui.view === "projects") renderProjects();
+    } else if (event === "open-projects") {
+      show("projects");
     } else if (event === "toast") {
       toast(data.text, data.level);
     }
@@ -996,9 +1112,9 @@ window.vault = {
 
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && !$("#drawer").classList.contains("hidden")) closeSettings();
-  if (e.metaKey && ["1", "2", "3", "4", "5"].includes(e.key)) {
+  if (e.metaKey && ["1", "2", "3", "4", "5", "6"].includes(e.key)) {
     e.preventDefault();
-    show(["studio", "compare", "newmac", "inventory", "snapshots"][Number(e.key) - 1]);
+    show(["studio", "compare", "newmac", "projects", "inventory", "snapshots"][Number(e.key) - 1]);
   }
 });
 // Stop the web view from opening dropped files itself; Python imports snapshot drops.

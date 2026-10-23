@@ -147,6 +147,15 @@ select.select { background: var(--bg); border: 1px solid var(--line-strong); bor
 .cmp-row .note { grid-column: 1 / -1; margin-top: -4px; font-size: var(--fs-s); color: var(--muted); }
 .st.only_a { color: var(--danger); } .st.only_b { color: var(--accent); } .st.different { color: var(--warn); } .st.same { color: var(--muted); }
 
+/* ── Projects ─────────────────────────────────────────────────────── */
+.proj { margin-bottom: 8px; padding: 0; }
+.proj summary { list-style: none; display: flex; gap: 16px; align-items: center; padding: 14px 20px; cursor: pointer; }
+.proj summary::-webkit-details-marker { display: none; }
+.proj summary .grow { flex: 1; min-width: 0; }
+.proj summary .path { color: var(--muted); font-size: var(--fs-s); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); }
+.proj .body { padding: 0 20px 12px; }
+.st.missing { color: var(--danger); } .st.other_format { color: var(--warn); } .st.installed { color: var(--ok); }
+
 /* ── New Mac ──────────────────────────────────────────────────────── */
 .source { margin-top: 24px; }
 .source-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }

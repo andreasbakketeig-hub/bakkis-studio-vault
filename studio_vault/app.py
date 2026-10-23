@@ -57,6 +57,11 @@ class NativeBridge:
             save_filename=default_name, file_types=file_types)
         return self._first(result)
 
+    def choose_open_files(self, file_types: tuple[str, ...]) -> list[str]:
+        result = self.window.create_file_dialog(
+            OPEN_DIALOG, directory=str(Path.home() / "Music"), allow_multiple=True, file_types=file_types)
+        return [str(p) for p in result] if result else []
+
     def choose_folder(self) -> str | None:
         return self._first(self.window.create_file_dialog(FOLDER_DIALOG, directory="/Volumes"))
 
@@ -119,9 +124,19 @@ class NativeBridge:
 
     def on_drop(self, event: dict) -> None:
         files = ((event or {}).get("dataTransfer") or {}).get("files") or []
-        paths = snapshot_files_from_drop([f.get("pywebviewFullPath") for f in files if isinstance(f, dict)])
+        dropped = [f.get("pywebviewFullPath") for f in files if isinstance(f, dict)]
+        als = [p for p in dropped if p and p.lower().endswith(".als") and Path(p).is_file()]
+        if als:
+            assert self.api is not None
+            result = self.api.projects_check_paths(als)
+            if result.get("ok"):
+                self.emit("open-projects", None)
+            else:
+                self.emit("toast", {"level": "error", "text": result.get("error", "Could not check projects.")})
+            return
+        paths = snapshot_files_from_drop(dropped)
         if not paths:
-            self.emit("toast", {"level": "warning", "text": "Drop a .studiovault snapshot file to import it."})
+            self.emit("toast", {"level": "warning", "text": "Drop a .studiovault snapshot, or an Ableton Live Set (.als) to check it."})
             return
         assert self.api is not None
         for path in paths:

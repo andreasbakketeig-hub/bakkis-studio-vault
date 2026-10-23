@@ -10,6 +10,7 @@ Made by [BAKKIS](https://bakkis.com), DJ and producer from Norway.
 - Shows what changed since your last snapshot: new plug-ins, updates and anything that disappeared
 - New Mac checklist grouped by vendor, with the installer app (Native Access, Waves Central, UA Connect …), the license system (account, iLok, serial) and a download link
 - Compare two Macs side by side, for example your studio Mac and your touring laptop: what each one lacks, per vendor
+- Checks Ableton Live projects: which plug-ins each set needs, and which are missing on this Mac or on another Mac (for example your touring laptop)
 - Flags Intel-only plug-ins (they only load under Rosetta on Apple Silicon) and plug-ins that need a newer macOS, read straight from the files, no online database
 - **Read-only**: it never moves, changes or deletes a plug-in, and nothing leaves your Mac
 
@@ -76,16 +77,18 @@ Hardware is on the list too: connect each device and install its driver; it tick
 | **My Studio** | Counts of plug-ins (per product and format), music apps, hardware and vendors, and what changed since the last snapshot. |
 | **Compare** | Two Macs (or two snapshots of one Mac) side by side, grouped by vendor: what is only on A, only on B, or installed in a different version or with other formats. |
 | **New Mac** | *On the new Mac*: the checklist built from a snapshot of the old Mac. Filter by missing or done, search, tick, print or export. *Before you leave the old Mac*: export the snapshot and deactivate licenses tied to that computer. |
+| **Projects** | Check Ableton Live sets (pick files or a whole folder, or drop `.als` files on the window) against this Mac or another Mac's snapshot: which projects open with every plug-in, which plug-ins are missing across them, and where a project uses a format (AU, VST, VST3) that is not installed. |
 | **Inventory** | Every plug-in (one row per product, all formats together), app and device. Filter by type (instrument, effect, MIDI), vendor and format; show in Finder; copy the path; export as CSV. |
 | **Snapshots** | Every saved scan of this Mac and the ones you imported from other Macs. Rename, export, compare with this Mac, or move to Trash. |
 
-Press **⌘1–⌘5** to switch screens. Settings (the gear icon) has scanning options, extra plug-in folders, and About.
+Press **⌘1–⌘6** to switch screens. Settings (the gear icon) has scanning options, extra plug-in folders, and About.
 
 ### What it reads
 
 - Plug-ins in the standard macOS folders (`/Library/Audio/Plug-Ins/…`, `~/Library/Audio/Plug-Ins/…`, Avid's AAX folder) plus any extra folders you add in Settings.
 - Version, vendor, type and minimum macOS from each plug-in's `Info.plist` and VST3 `moduleinfo.json`, and the processor (Apple Silicon, Intel or both) from the header of its binary. Plug-ins are never loaded or run.
 - Music apps in `/Applications` and `~/Applications`.
+- Ableton Live sets you choose in **Projects** (only the list of plug-in devices; projects are never changed).
 - Audio, MIDI and USB devices through macOS `system_profiler` and Core MIDI.
 
 ---

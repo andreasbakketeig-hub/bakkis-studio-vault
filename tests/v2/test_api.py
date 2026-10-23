@@ -402,3 +402,20 @@ def test_leave_list_api(vault, scanners):
     res = vault.leave_tick("license:waves", True)["leave"]
     assert res["licenses"][0]["done"] is True
     json.dumps(res)
+
+
+def test_project_check_api(vault, native, tmp_path):
+    from tests.v2.test_projects import write_als
+    run_scan(vault)
+    folder = tmp_path / "Live Projects"
+    write_als(folder / "One Project" / "One.als")
+    native.folder_result = str(folder)
+    assert vault.projects_choose_folder()["ok"]
+    vault._projects_thread.join(timeout=5)
+    res = vault.projects_result()
+    assert res["job"]["status"] == "done" and res["job"]["total"] == 1
+    [p] = res["projects"]
+    assert p["name"] == "One" and p["missing"] >= 1
+    assert res["missing"]
+    json.dumps(res)
+    assert vault.projects_check_paths(["/x/notes.txt"])["ok"] is False
