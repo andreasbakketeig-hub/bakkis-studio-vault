@@ -1,6 +1,6 @@
 # BAKKIS STUDIO VAULT v2 — rebuild plan
 
-Status: milestones 1–2 done 2026-10-23 (scanners, vendors, snapshots with v1 import + privacy, compare; tested on Andreas' Mac: 1,148 plug-ins, 90% of products matched to a vendor). Next: milestone 3. Branch `v2-pywebview` (off `feature/license-vault`).
+Status: milestones 1–3 done 2026-10-23 (scanners, vendors, snapshots with v1 import + privacy, compare, new-Mac checklist, HTML/CSV reports; tested on Andreas' Mac: 1,148 plug-ins, 90% of products matched to a vendor). Next: milestone 4 (pywebview app shell). Branch `v2-pywebview` (off `feature/license-vault`).
 Owner: Andreas (BAKKIS). Communicate with him in Norwegian; code, comments and commits in English.
 
 ## Goal

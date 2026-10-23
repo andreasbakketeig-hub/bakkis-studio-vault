@@ -91,3 +91,10 @@ class TestScanMusicApps:
         assert by_name["Ableton Live 12 Suite"].category == CATEGORY_DAW
         assert by_name["Ableton Live 12 Suite"].version == "12.1"
         assert by_name["Native Access"].category == CATEGORY_PLUGIN_MANAGER
+
+    def test_developer_is_never_a_bare_year(self, tmp_path):
+        apps = tmp_path / "Applications"
+        make_bundle(apps, "Maschine 2.app", {"CFBundleGetInfoString": "Maschine 2, © 2024",
+                                             "CFBundleIdentifier": "com.native-instruments.Maschine 2"})
+        [app] = scan_music_apps([str(apps)])
+        assert app.developer == "Native Instruments"

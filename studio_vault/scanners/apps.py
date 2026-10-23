@@ -11,11 +11,12 @@ from __future__ import annotations
 import datetime
 import os
 import plistlib
-import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
+
+from studio_vault.scanners.plugins import _developer_from_plist
 
 # ── Category constants ────────────────────────────────────────────────────────
 
@@ -327,7 +328,8 @@ def _classify(app_path: Path) -> MusicApp | None:
     for match_str, category, known_developer in KNOWN_APPS:
         if match_str.lower() in stem_lower:
             meta = _app_metadata(app_path)
-            developer = meta["developer"] or known_developer
+            # The registry name is curated; Info.plist strings are often just "© 2024".
+            developer = known_developer or meta["developer"]
             return MusicApp(
                 name=app_path.stem,
                 category=category,
@@ -367,30 +369,7 @@ def _app_metadata(app_path: Path) -> dict:
         or ""
     ).strip()
 
-    developer = ""
-
-    copyright_str: str = plist.get("NSHumanReadableCopyright", "")
-    if copyright_str:
-        match = re.search(
-            r"©\s*\d{0,4}\s*([\w\s&]+?)(?:,|\.|Inc|LLC|Ltd|GmbH|$)",
-            copyright_str,
-        )
-        if match:
-            developer = match.group(1).strip()
-
-    if not developer:
-        info_str: str = plist.get("CFBundleGetInfoString", "")
-        if "©" in info_str:
-            parts = info_str.split("©")
-            candidate = parts[-1].strip().split(" ")[0]
-            if len(candidate) > 2:
-                developer = candidate
-
-    if not developer:
-        bundle_id: str = plist.get("CFBundleIdentifier", "")
-        parts = bundle_id.split(".")
-        if len(parts) >= 2 and parts[0] in ("com", "org", "net", "io", "audio"):
-            developer = parts[1].replace("-", " ").replace("_", " ").title()
+    developer = _developer_from_plist(plist)
 
     meta["developer"] = developer
     return meta
