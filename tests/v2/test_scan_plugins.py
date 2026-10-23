@@ -204,3 +204,27 @@ class TestLiveNames:
             '{"Classes": [{"Category": "Audio Module Class", "Name": "Serum 2",}],}')
         assert bundle_metadata(v3)["live_names"] == ("Serum 2",)
         assert bundle_metadata(make_bundle(tmp_path, "X.vst", _plist()))["live_names"] == ()
+
+
+class TestFoldersAndCachePruning:
+    def test_symlinked_folders_are_followed_once(self, tmp_path):
+        external = tmp_path / "External SSD" / "VST3"
+        make_bundle(external, "Far.vst3", _plist())
+        root = tmp_path / "VST3"
+        make_bundle(root, "Near.vst3", _plist())
+        (root / "On SSD").symlink_to(external, target_is_directory=True)
+        (external / "loop").symlink_to(root, target_is_directory=True)    # a cycle
+        names = sorted(p.name for p in scan_plugins([str(root)]).plugins)
+        assert names == ["Far", "Near"]
+
+    def test_uninstalled_bundles_leave_the_size_cache(self, tmp_path):
+        root = tmp_path / "VST3"
+        keep = make_bundle(root, "Keep.vst3", _plist(), payload=10)
+        gone = make_bundle(root, "Gone.vst3", _plist(), payload=10)
+        cache_file = tmp_path / "sizes.json"
+        scan_plugins([str(root)], size_cache=SizeCache(cache_file))
+        import json, shutil
+        assert set(json.loads(cache_file.read_text())) == {str(keep), str(gone)}
+        shutil.rmtree(gone)
+        scan_plugins([str(root)], size_cache=SizeCache(cache_file))
+        assert set(json.loads(cache_file.read_text())) == {str(keep)}

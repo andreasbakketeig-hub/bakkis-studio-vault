@@ -37,6 +37,9 @@ KNOWN: tuple[tuple[str, str], ...] = (
 )
 
 VENDOR_ROOTS: tuple[str, ...] = ("Documents", "Music")
+# A vendor folder is named exactly after the vendor, optionally followed by one of these words.
+CONTENT_WORDS: tuple[str, ...] = ("", "content", "presets", "preset", "library", "libraries", "samples",
+                                  "sessions", "user", "userdata", "data", "sounds", "files")
 
 
 @dataclass(frozen=True)
@@ -95,7 +98,7 @@ def find(vendor_names: Iterable[str], home: Path | None = None,
             if any(k.startswith(str(entry) + os.sep) for k in known_paths):
                 continue
             key = _norm(entry.name)
-            if any(key == w or key.startswith(w) for w in wanted):
+            if any(key == w + word for w in wanted for word in CONTENT_WORDS):
                 found[str(entry)] = f"{entry.name} ({root})"
 
     out: list[ContentFolder] = []

@@ -35,3 +35,10 @@ def test_size_budget_marks_approximate(tmp_path):
 
 def test_nothing_found(tmp_path):
     assert content.find(["Acme"], home=tmp_path) == []
+
+
+def test_vendor_folder_must_be_the_vendor_name(tmp_path):
+    for name in ("Output", "Output Renders", "Loopcloud Sessions", "PHIL SPEISER CONTENT", "Monkey C. Audio", "Korgasm"):
+        _file(tmp_path / "Music" / name / "f.bin", 1)
+    found = {f.label for f in content.find(["Output Inc", "Loopcloud", "Phil Speiser", "Monkeycaudio", "Korg"], home=tmp_path)}
+    assert found == {"Output (Music)", "Loopcloud Sessions (Music)", "PHIL SPEISER CONTENT (Music)", "Monkey C. Audio (Music)"}

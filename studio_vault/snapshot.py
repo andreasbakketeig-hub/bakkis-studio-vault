@@ -179,8 +179,18 @@ def this_machine_id() -> str:
     return _this_machine_id
 
 
+_this_machine_name: str | None = None
+
+
 def this_machine_name() -> str:
-    """The Mac's user-visible name (System Settings → General → Sharing)."""
+    """The Mac's user-visible name (System Settings → General → Sharing); read once per launch."""
+    global _this_machine_name
+    if _this_machine_name is None:
+        _this_machine_name = _read_machine_name()
+    return _this_machine_name
+
+
+def _read_machine_name() -> str:
     try:
         name = subprocess.run(
             ["scutil", "--get", "ComputerName"],
@@ -428,6 +438,10 @@ def import_file(src: Path | str) -> Snapshot:
     return snapshot
 
 
+# path -> ((mtime_ns, size), info): a snapshot file is parsed again only when it changed.
+_info_cache: dict[str, tuple[tuple[int, int, str], "SnapshotInfo | None"]] = {}
+
+
 def list_snapshots() -> list[SnapshotInfo]:
     """All stored snapshots, newest first. Unreadable files are skipped."""
     folder = config.snapshots_dir()
@@ -437,10 +451,21 @@ def list_snapshots() -> list[SnapshotInfo]:
     infos: list[SnapshotInfo] = []
     for path in folder.glob(f"*{FILE_SUFFIX}"):
         try:
+            st = path.stat()
+        except OSError:
+            continue
+        stamp = (st.st_mtime_ns, st.st_size, mine)
+        cached = _info_cache.get(str(path))
+        if cached is not None and cached[0] == stamp:
+            if cached[1] is not None:
+                infos.append(cached[1])
+            continue
+        try:
             snap = load(path)
         except SnapshotError:
+            _info_cache[str(path)] = (stamp, None)
             continue
-        infos.append(SnapshotInfo(
+        info = SnapshotInfo(
             path=path,
             id=snap.id,
             name=snap.name,
@@ -450,7 +475,9 @@ def list_snapshots() -> list[SnapshotInfo]:
             app_count=len(snap.apps),
             hardware_count=len(snap.hardware),
             is_this_mac=bool(mine) and snap.machine_id == mine,
-        ))
+        )
+        _info_cache[str(path)] = (stamp, info)
+        infos.append(info)
     infos.sort(key=lambda i: i.created_at, reverse=True)
     return infos
 

@@ -32,7 +32,7 @@ from studio_vault.compare import compare, compare_versions, side_by_side
 from studio_vault.scanners.apps import scan_music_apps
 from studio_vault.scanners.hardware import scan_hardware
 from studio_vault.scanners.plugins import ARCH_INTEL, FORMAT_ORDER, SCAN_PATHS, SizeCache, normalize_product_name, scan_plugins
-from studio_vault.vendors import VENDORS, match_vendor
+from studio_vault.vendors import match_vendor
 
 SCAN_IDLE = "idle"
 SCAN_RUNNING = "running"
@@ -243,7 +243,9 @@ class Api:
             if self._cancel.is_set():
                 return self._finish(SCAN_CANCELLED)
             self._progress("content", "Measuring presets and your own content…")
-            vendor_names = {p.developer for p in plugins.plugins if p.developer} | {v.name for v in VENDORS}
+            # Only vendors whose plug-ins are on this Mac, by developer name and registry name.
+            vendor_names = {p.developer for p in plugins.plugins if p.developer}
+            vendor_names |= {v.name for p in plugins.plugins if (v := match_vendor(p.developer, p.bundle_id))}
             user_content = content.find(vendor_names)
             if self._cancel.is_set():
                 return self._finish(SCAN_CANCELLED)
@@ -600,7 +602,8 @@ class Api:
             path = self._require_native().choose_open_file(("Ableton Live Set (*.als)",))
             if not path:
                 return _ok(cancelled=True)
-            self._handoff_set = path
+            with self._lock:
+                self._handoff_set = path
             return self.handoff_report()
         return self._guard(run)
 
@@ -617,26 +620,32 @@ class Api:
         try:
             for p in paths:
                 if p.lower().endswith(pluginlist.FILE_SUFFIX):
-                    self._handoff_receiver = pluginlist.load(p)
+                    loaded = pluginlist.load(p)
+                    with self._lock:
+                        self._handoff_receiver = loaded
                 elif p.lower().endswith(".als"):
-                    self._handoff_set = p
+                    with self._lock:
+                        self._handoff_set = p
         except pluginlist.PluginListError as exc:
             return _fail(str(exc))
         return self.handoff_report()
 
     def handoff_clear_receiver(self) -> dict:
-        self._handoff_receiver = None
+        with self._lock:
+            self._handoff_receiver = None
         return self.handoff_report()
 
     def handoff_report(self) -> dict:
-        rec = self._handoff_receiver
+        # pywebview calls each method on its own thread: read the pair once, together.
+        with self._lock:
+            rec, set_path = self._handoff_receiver, self._handoff_set
         receiver = None if rec is None else {
             "name": rec.machine_name, "created_at": rec.created_at, "plugins": len(rec.plugins),
             "live": [f"{i.name} {i.version.split(' ')[0]}" for i in rec.live]}
-        if not self._handoff_set:
+        if not set_path:
             return _ok(report=None, receiver=receiver)
         try:
-            live_set = handoff_als.read(self._handoff_set)
+            live_set = handoff_als.read(set_path)
         except handoff_als.AlsError as exc:
             return _fail(str(exc))
         r = handoff_check.check(live_set, rec)
@@ -674,22 +683,25 @@ class Api:
 
     # ── Finder & browser ──────────────────────────────────────────────────────
 
+    @staticmethod
+    def _existing_path(path: str) -> str:
+        """A path as stored in a snapshot ("~/…") expanded, if it exists on this Mac."""
+        real = os.path.expanduser(path or "")
+        if not real.startswith("/") or not os.path.exists(real):
+            raise ApiError("Not found on this Mac.")
+        return real
+
     def reveal(self, path: str) -> dict:
         """Show a plug-in or app (path as stored in a snapshot, "~/…") in Finder."""
         def run() -> dict:
-            real = os.path.expanduser(path or "")
-            if not real.startswith("/") or not os.path.exists(real):
-                raise ApiError("Not found on this Mac.")
-            self._require_native().reveal_in_finder(real)
+            self._require_native().reveal_in_finder(self._existing_path(path))
             return _ok()
         return self._guard(run)
 
     def copy_path(self, path: str) -> dict:
         """Copy a plug-in or app path (as stored, "~/…") to the clipboard as a full path."""
         def run() -> dict:
-            real = os.path.expanduser(path or "")
-            if not real.startswith("/"):
-                raise ApiError("No path to copy.")
+            real = self._existing_path(path)
             self._require_native().copy_to_clipboard(real)
             return _ok(path=real)
         return self._guard(run)

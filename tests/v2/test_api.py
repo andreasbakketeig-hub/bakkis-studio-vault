@@ -369,11 +369,20 @@ def test_product_kind_vendor_url_and_copy_path(vault, native, scanners):
     serum = next(p for p in vault.inventory("current")["products"] if p["name"] == "Serum")
     assert serum["kind"] == "Instrument"            # AAX copy inherits it from the VST3
     assert serum["vendor_url"].startswith("https://")
-    res = vault.copy_path(serum["path"])
-    assert res["ok"] and native.copied == [res["path"]]
-    assert native.copied[0].endswith("/Library/Audio/Plug-Ins/VST3/Serum.vst3")
-    assert not native.copied[0].startswith("~")
+    assert serum["path"].endswith("/Library/Audio/Plug-Ins/VST3/Serum.vst3")   # the VST3 copy, not the AAX
+    # The scanned path does not exist in the test; copying needs a path that does, like Show in Finder.
+    assert vault.copy_path(serum["path"]) == {"ok": False, "error": "Not found on this Mac."}
     assert vault.copy_path("")["ok"] is False
+    assert native.copied == []
+
+
+def test_copy_path_expands_home_and_needs_an_existing_path(vault, native, tmp_path, monkeypatch):
+    bundle = tmp_path / "Library" / "Audio" / "Plug-Ins" / "VST3" / "Serum.vst3"
+    bundle.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    res = vault.copy_path("~/Library/Audio/Plug-Ins/VST3/Serum.vst3")
+    assert res["ok"] and native.copied == [str(bundle)]
+    assert vault.copy_path("/etc/definitely-not-here")["ok"] is False
 
 
 def test_side_by_side_api(vault, scanners):
@@ -464,3 +473,34 @@ def test_handoff_flow(vault, native, tmp_path):
     empty = tmp_path / "empty.als"
     empty.write_bytes(b"")
     assert vault.handoff_open_paths([str(empty)])["error"] == "The file is empty."
+
+
+def test_handoff_state_survives_concurrent_calls(vault, tmp_path):
+    from studio_vault.handoff import pluginlist
+    from tests.v2.handoff_fixtures import live_set, write_set
+    als_path = write_set(tmp_path / "P" / "Song.als", live_set(""))
+    lst = pluginlist.save(pluginlist.PluginList("Laptop", "", [], []), tmp_path / "list")
+    errors = []
+
+    def worker(i):
+        try:
+            for _ in range(20):
+                (vault.handoff_open_paths([str(als_path), str(lst)]) if i % 2 else vault.handoff_clear_receiver())
+                assert vault.handoff_report()["ok"]
+        except Exception as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(6)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == []
+
+
+def test_content_search_only_uses_vendors_on_this_mac(vault, scanners):
+    seen = {}
+    with patch.object(api_mod.content, "find", side_effect=lambda names: seen.setdefault("names", set(names)) and []):
+        run_scan(vault)
+    assert "Xfer Records" in seen["names"] and "FabFilter" in seen["names"]
+    assert "Waves" not in seen["names"] and "Native Instruments" not in seen["names"]

@@ -231,3 +231,20 @@ class TestStorage:
 
     def test_import_legacy_missing_folder(self, tmp_path):
         assert snap.import_legacy(tmp_path / "nope") == 0
+
+
+class TestListingCache:
+    def test_unchanged_files_are_not_parsed_again(self):
+        s = _scan_snapshot()
+        snap.save(s)
+        snap.list_snapshots()
+        with patch.object(snap, "load", side_effect=AssertionError("parsed again")):
+            assert [i.id for i in snap.list_snapshots()] == [s.id]
+
+    def test_changed_file_is_parsed_again(self):
+        s = _scan_snapshot()
+        path = snap.save(s)
+        snap.list_snapshots()
+        s.name = "Renamed snapshot of the studio"
+        snap.write(s, path)
+        assert snap.list_snapshots()[0].name == "Renamed snapshot of the studio"

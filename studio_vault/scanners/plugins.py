@@ -156,6 +156,14 @@ class SizeCache:
         self._dirty = True
         return size
 
+    def prune(self, keep: set[str], roots: list[str]) -> None:
+        """Forget bundles under *roots* that the last full scan did not find (uninstalled)."""
+        prefixes = tuple(r.rstrip("/") + "/" for r in roots)
+        stale = [p for p in self._entries if p.startswith(prefixes) and p not in keep]
+        for p in stale:
+            del self._entries[p]
+        self._dirty = self._dirty or bool(stale)
+
     def save(self) -> None:
         if self._path is None or not self._dirty:
             return
@@ -205,7 +213,7 @@ def scan_plugins(
             progress_cb(f"Scanning {base_path}…")
         if not base_path.exists():
             continue
-        for bundle in _find_bundles(base_path, cancel):
+        for bundle in _find_bundles(base_path, cancel, set()):
             key = str(bundle)
             if key in seen:
                 continue
@@ -214,16 +222,23 @@ def scan_plugins(
 
     if cancel is not None and cancel.is_set():
         result.cancelled = True
+    else:
+        cache.prune(seen, list(targets))
     cache.save()
     if progress_cb:
         progress_cb(f"Done — {result.count} plug-in(s) found.")
     return result
 
 
-def _find_bundles(root: Path, cancel: CancelFlag | None) -> list[Path]:
-    """Recursively collect plug-in bundles under *root* (vendor subfolders included)."""
+def _find_bundles(root: Path, cancel: CancelFlag | None, visited: set[str]) -> list[Path]:
+    """Recursively collect plug-in bundles under *root* (vendor subfolders included).
+    Folder symlinks are followed (plug-ins on an external drive), each real folder once."""
     found: list[Path] = []
     try:
+        real = os.path.realpath(root)
+        if real in visited:
+            return found
+        visited.add(real)
         entries = sorted(root.iterdir())
     except OSError:
         return found
@@ -232,8 +247,8 @@ def _find_bundles(root: Path, cancel: CancelFlag | None) -> list[Path]:
             break
         if item.suffix.lower() in PLUGIN_FORMATS:
             found.append(item)
-        elif item.is_dir() and not item.is_symlink():
-            found.extend(_find_bundles(item, cancel))
+        elif item.is_dir():
+            found.extend(_find_bundles(item, cancel, visited))
     return found
 
 

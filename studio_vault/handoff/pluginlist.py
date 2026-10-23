@@ -145,8 +145,15 @@ def au_component_names(plist: dict) -> list[tuple[str, str]]:
 
 
 def _find_bundles(root: Path) -> list[Path]:
+    """Plug-in bundles under *root*; folder symlinks are followed, each real folder once."""
     found: list[Path] = []
-    for dirpath, dirnames, _files in os.walk(root):
+    visited: set[str] = set()
+    for dirpath, dirnames, _files in os.walk(root, followlinks=True):
+        real = os.path.realpath(dirpath)
+        if real in visited:
+            dirnames[:] = []
+            continue
+        visited.add(real)
         keep = []
         for d in dirnames:
             if Path(d).suffix.lower() in _SUFFIX_FMT:
