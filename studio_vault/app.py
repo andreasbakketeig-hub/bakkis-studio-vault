@@ -28,6 +28,7 @@ WINDOW_SIZE = (1240, 820)
 MIN_SIZE = (900, 620)
 BACKGROUND = "#0E0F11"
 SNAPSHOT_SUFFIXES = (FILE_SUFFIX, ".json")
+HANDOFF_LIST_SUFFIX = ".handoffplugins"
 
 
 def snapshot_files_from_drop(paths: list[str | None]) -> list[str]:
@@ -126,17 +127,14 @@ class NativeBridge:
         files = ((event or {}).get("dataTransfer") or {}).get("files") or []
         dropped = [f.get("pywebviewFullPath") for f in files if isinstance(f, dict)]
         als = [p for p in dropped if p and p.lower().endswith(".als") and Path(p).is_file()]
-        if als:
-            assert self.api is not None
-            result = self.api.projects_check_paths(als)
-            if result.get("ok"):
-                self.emit("open-projects", None)
-            else:
-                self.emit("toast", {"level": "error", "text": result.get("error", "Could not check projects.")})
+        lists = [p for p in dropped if p and p.lower().endswith(HANDOFF_LIST_SUFFIX) and Path(p).is_file()]
+        if als or lists:
+            # The page decides: Handoff takes them when it is open, else .als files go to Projects.
+            self.emit("dropped", {"als": als, "plugin_lists": lists})
             return
         paths = snapshot_files_from_drop(dropped)
         if not paths:
-            self.emit("toast", {"level": "warning", "text": "Drop a .studiovault snapshot, or an Ableton Live Set (.als) to check it."})
+            self.emit("toast", {"level": "warning", "text": "Drop a .studiovault snapshot, an Ableton Live Set (.als) or a plug-in list."})
             return
         assert self.api is not None
         for path in paths:

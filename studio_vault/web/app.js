@@ -16,6 +16,7 @@ const ui = {
   newmac: { mode: "new", sourceId: "", picked: false, data: null, filter: "missing", q: "", open: new Set(), leave: null },
   cmp: { a: "", b: "", data: null, filter: "diff", q: "", open: new Set() },
   proj: { target: "", data: null, job: null, filter: "need", q: "", limit: 100 },
+  ho: { mode: "send", data: null, exported: null, open: new Set() },
   inv: { id: "", data: null, tab: "plugins", q: "", fmt: "", kind: "", vendor: "", arch: "", sort: "name", dir: 1 },
   about: null,
 };
@@ -155,6 +156,7 @@ function render() {
   if (ui.view === "studio") renderStudio();
   else if (ui.view === "compare") loadCompare();
   else if (ui.view === "projects") loadProjects();
+  else if (ui.view === "handoff") loadHandoff();
   else if (ui.view === "snapshots") renderSnapshots();
   else if (ui.view === "newmac") loadNewMac();
   else if (ui.view === "inventory") loadInventory();
@@ -616,6 +618,92 @@ function renderProjects() {
     if (rows.length > P.limit) cards.push(el("button", { class: "btn", onclick: () => { P.limit += 200; renderList(); } }, `Show ${num(Math.min(200, rows.length - P.limit))} more`));
     box.replaceChildren(...(cards.length ? cards : [el("div", { class: "empty" }, q ? "Nothing matches." : "None.")]));
   }
+}
+
+// ── Handoff ──────────────────────────────────────────────────────────────────
+
+async function loadHandoff() {
+  const res = await api().handoff_report();
+  if (res.ok) ui.ho.data = res;
+  renderHandoff();
+}
+
+async function handoffCall(method, ...args) {
+  const res = await call(method, ...args);
+  if (res.ok && !res.cancelled && "report" in res) { ui.ho.data = res; ui.ho.open.clear(); }
+  renderHandoff();
+  return res;
+}
+
+const LIGHT = {
+  green: ["Ready to send", "Everything the receiver needs is in the project."],
+  yellow: ["Ready, with things to check", "It can be sent. Look at the yellow points first."],
+  red: ["Something will be missing for the receiver", "Fix the red points in Live, save, and check again."],
+};
+
+function renderHandoff() {
+  const root = $("#view-handoff");
+  const H = ui.ho;
+  const head = el("div", { class: "head" },
+    el("div", {}, el("h1", {}, "Handoff"), el("p", { class: "sub" }, "Get an Ableton Live project ready for a collaborator. Everything stays on your Mac.")));
+  const tabs = el("div", { class: "chips", role: "group", "aria-label": "Send or receive", style: "margin-top: 20px" },
+    [["send", "Send a project"], ["receive", "Receive projects"]].map(([k, label]) =>
+      el("button", { class: `chip${H.mode === k ? " on" : ""}`, "aria-pressed": String(H.mode === k), onclick: () => { H.mode = k; renderHandoff(); } }, label)));
+
+  if (H.mode === "receive") {
+    const ex = H.exported;
+    root.replaceChildren(head, tabs, el("div", { class: "card", style: "margin-top: 16px" },
+      el("h2", {}, "Export my plug-in list"),
+      el("p", { class: "soft", style: "margin: 8px 0 16px" }, "One small file with the plug-ins Live can load on this Mac and your Live version. Send it to whoever sends you projects: they check their project against it before sending. No paths, serials or personal data."),
+      el("button", { class: "btn primary", onclick: async () => { const r = await call("handoff_export_plugins"); if (r.ok && !r.cancelled) { H.exported = r; renderHandoff(); toast("Plug-in list saved."); } } }, "Export my plug-in list…"),
+      ex ? el("p", { class: "muted", style: "margin: 16px 0 0; font-size: var(--fs-s)" },
+        `Saved ${plural(ex.plugins, "plug-in")}${ex.live.length ? ` and ${ex.live.join(", ")}` : ""} to `, el("span", { style: "font-family: var(--mono)" }, ex.path)) : null));
+    return;
+  }
+
+  const d = H.data || {};
+  const rec = d.receiver, r = d.report;
+  const setCard = el("div", { class: "card" },
+    el("div", { class: "muted", style: "font-size: var(--fs-s)" }, "PROJECT"),
+    r ? el("div", {}, el("b", {}, r.set_name), el("div", { class: "muted", style: "font-size: var(--fs-s); font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap", title: r.set_path }, r.set_path))
+      : el("div", { class: "soft" }, "Choose the Live Set you want to send, or drop it here."),
+    el("div", { class: "actions" }, el("button", { class: r ? "btn small" : "btn primary", onclick: () => handoffCall("handoff_choose_set") }, r ? "Choose another…" : "Choose Live Set…"),
+      r ? el("button", { class: "btn small", onclick: () => handoffCall("handoff_report") }, "Check again") : null));
+  const recCard = el("div", { class: "card" },
+    el("div", { class: "muted", style: "font-size: var(--fs-s)" }, "RECEIVER"),
+    rec ? el("div", {}, el("b", {}, rec.name), el("div", { class: "muted", style: "font-size: var(--fs-s)" },
+      `${plural(rec.plugins, "plug-in")}${rec.live.length ? ` · ${rec.live.join(", ")}` : ""} · exported ${fmtDate(rec.created_at, false)}`))
+      : el("div", { class: "soft" }, "Load their plug-in list to check plug-ins and Live version. They export it under Handoff › Receive projects."),
+    el("div", { class: "actions" }, el("button", { class: "btn small", onclick: () => handoffCall("handoff_choose_receiver") }, rec ? "Load another…" : "Load their plug-in list…"),
+      rec ? el("button", { class: "link", onclick: () => handoffCall("handoff_clear_receiver") }, "Remove") : null));
+  const parts = [head, tabs, el("div", { class: "pair" }, setCard, recCard)];
+
+  if (r) {
+    const [title, sub] = LIGHT[r.level];
+    const facts = [`Live ${r.live_version || "?"}`, r.tempo ? `${r.tempo} BPM` : null, plural(r.tracks, "track")].filter(Boolean).join(" · ");
+    parts.push(el("div", { class: `card light ${r.level}`, role: "status" },
+      el("span", { class: `dot ${r.level}`, "aria-hidden": "true" }),
+      el("div", { style: "flex: 1" }, el("h2", {}, title), el("div", { class: "soft", style: "font-size: var(--fs-s)" }, `${sub} ${facts}`)),
+      el("button", { class: "btn primary", disabled: true, title: r.can_pack ? "Packing comes in the next update" : "Fix the red points first" }, "Pack…")));
+    parts.push(el("section", { class: "card group", style: "margin-top: 12px" },
+      r.findings.map((f) => {
+        const open = H.open.has(f.key);
+        const items = open ? f.items : f.items.slice(0, 6);
+        return el("div", { class: "finding" },
+          el("span", { class: `dot ${f.level}`, "aria-hidden": "true" }),
+          el("div", { style: "flex: 1; min-width: 0" }, el("b", {}, f.title), el("span", { class: "sr" }, ` (${f.level})`),
+            f.detail ? el("div", { class: "soft", style: "font-size: var(--fs-s)" }, f.detail) : null,
+            items.length ? el("ul", {}, items.map((x) => el("li", {}, x))) : null,
+            f.items.length > items.length ? el("button", { class: "link", style: "padding-left: 0", onclick: () => { H.open.add(f.key); renderHandoff(); } }, `Show ${num(f.items.length - items.length)} more`) : null));
+      })));
+    parts.push(el("section", { class: "card group" },
+      el("div", { class: "group-head" }, el("h2", {}, "Not in the file: check these yourself")),
+      [["Libraries inside plug-ins", "Kontakt libraries, Serum wavetables, presets the receiver may not have."],
+       ["A reference bounce", "An mp3 of how it sounds on your side."],
+       ["Stems as a backup", "In case something still does not load."]].map(([t, x]) =>
+        el("div", { class: "item" }, el("span", { class: "name" }, el("b", {}, t), el("span", { class: "muted", style: "display: block; font-size: var(--fs-s)" }, x))))));
+  }
+  root.replaceChildren(...parts);
 }
 
 // ── New Mac ──────────────────────────────────────────────────────────────────
@@ -1128,8 +1216,15 @@ window.vault = {
         if (ui.view === "projects") loadProjects();
         if (data.status === "done") toast("Projects checked.");
       } else if (ui.view === "projects") renderProjects();
-    } else if (event === "open-projects") {
-      show("projects");
+    } else if (event === "dropped") {
+      if (data.plugin_lists.length || (ui.view === "handoff" && data.als.length)) {
+        ui.ho.mode = "send";
+        await handoffCall("handoff_open_paths", [...data.als.slice(0, 1), ...data.plugin_lists.slice(0, 1)]);
+        if (ui.view !== "handoff") show("handoff");
+      } else if (data.als.length) {
+        const r = await call("projects_check_paths", data.als);
+        if (r.ok) show("projects");
+      }
     } else if (event === "toast") {
       toast(data.text, data.level);
     }
@@ -1138,9 +1233,9 @@ window.vault = {
 
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && !$("#drawer").classList.contains("hidden")) closeSettings();
-  if (e.metaKey && ["1", "2", "3", "4", "5", "6"].includes(e.key)) {
+  if (e.metaKey && ["1", "2", "3", "4", "5", "6", "7"].includes(e.key)) {
     e.preventDefault();
-    show(["studio", "compare", "newmac", "projects", "inventory", "snapshots"][Number(e.key) - 1]);
+    show(["studio", "compare", "newmac", "projects", "handoff", "inventory", "snapshots"][Number(e.key) - 1]);
   }
 });
 // Stop the web view from opening dropped files itself; Python imports snapshot drops.

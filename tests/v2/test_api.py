@@ -306,6 +306,17 @@ class TestBridge:
         assert "Imported" in calls[0]
         assert len(vault.snapshots()["snapshots"]) == 1
 
+    def test_drop_als_and_plugin_list_goes_to_page(self, tmp_path):
+        als_file = tmp_path / "Song.als"
+        als_file.write_bytes(b"x")
+        lst = tmp_path / "Laptop plug-ins.handoffplugins"
+        lst.write_text("{}")
+        calls = []
+        bridge = NativeBridge(SimpleNamespace(evaluate_js=calls.append))
+        bridge.on_drop({"dataTransfer": {"files": [{"pywebviewFullPath": str(als_file)}, {"pywebviewFullPath": str(lst)}]}})
+        assert calls[0].startswith('window.vault && vault.onEvent("dropped"')
+        assert "Song.als" in calls[0] and "handoffplugins" in calls[0]
+
     def test_drop_wrong_file_warns(self, tmp_path):
         calls = []
         bridge = NativeBridge(SimpleNamespace(evaluate_js=calls.append))
@@ -420,3 +431,36 @@ def test_project_check_api(vault, native, tmp_path):
     assert res["missing"]
     json.dumps(res)
     assert vault.projects_check_paths(["/x/notes.txt"])["ok"] is False
+
+
+def test_handoff_flow(vault, native, tmp_path):
+    from studio_vault.handoff import pluginlist
+    from tests.v2.handoff_fixtures import file_ref, live_set, sample, touch, track, vst3, write_set
+    proj = tmp_path / "Song Project"
+    touch(proj / "Samples" / "kick.wav")
+    als_path = write_set(proj / "Song.als", live_set(track("AudioTrack", "Drums", vst3("Pro-Q 3") + sample(file_ref(3, "Samples/kick.wav")))))
+
+    fake = pluginlist.PluginList("Laptop", "2026-10-24T10:00:00",
+                                 [pluginlist.LiveInstall("Ableton Live 12 Suite", "12.1.10", "Suite")],
+                                 [pluginlist.Entry("Pro-Q 3", "VST3")])
+    native.save_result = str(tmp_path / "list")
+    with patch.object(api_mod.pluginlist, "scan", return_value=fake):
+        res = vault.handoff_export_plugins()
+    assert res["ok"] and res["path"].endswith(".handoffplugins") and res["plugins"] == 1
+    assert native.last_default_name == "Laptop plug-ins.handoffplugins"
+
+    assert vault.handoff_report() == {"ok": True, "report": None, "receiver": None}
+    native.open_result = str(als_path)
+    rep = vault.handoff_choose_set()["report"]
+    assert rep["set_name"] == "Song" and rep["level"] == "yellow"          # no receiver list yet
+    rep = vault.handoff_open_paths([res["path"]])
+    assert rep["receiver"]["name"] == "Laptop" and rep["report"]["level"] == "green"
+    json.dumps(rep)
+    assert vault.handoff_clear_receiver()["receiver"] is None
+
+    bad = tmp_path / "bad.handoffplugins"
+    bad.write_text("nope")
+    assert vault.handoff_open_paths([str(bad)])["ok"] is False
+    empty = tmp_path / "empty.als"
+    empty.write_bytes(b"")
+    assert vault.handoff_open_paths([str(empty)])["error"] == "The file is empty."

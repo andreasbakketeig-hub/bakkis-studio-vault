@@ -92,6 +92,20 @@ Studio Vault stays the whole-studio snapshot / migrate / compare tool, free and 
 
 Still out of scope: update checking, uninstall, enable/disable, shop.
 
+## Handoff module (2026-10-24, brief from Andreas)
+
+Prepare and pack Ableton Live projects for collaborators. Local only (no cloud, accounts or server);
+transport is the user's choice. Lives in `studio_vault/handoff/`, standard library only, no imports from the
+rest of the app, so it can become its own app.
+
+- Done: `.als` reader (read-only), receiver's one-click plug-in list export (`.handoffplugins`), checks with a
+  traffic light (red / yellow / green), Handoff screen (send + receive), drag and drop of `.als` and lists.
+- Next (V1): packing only on green/yellow: version name (`Track_v08_AB`), leave out `Backup/`, `.asd` and
+  `.DS_Store` **in the zip** (never delete in the user's folder), `HANDOFF.txt` (version, tempo, plug-ins,
+  frozen tracks, required "What did you change?" note), one zip; pick the main set when there are several.
+- Reminders shown (not visible in the file): libraries inside plug-ins, reference bounce, stems.
+- V2: diff between versions of a set.
+
 ## What to reuse from v1
 
 Port and trim (keep their tests):

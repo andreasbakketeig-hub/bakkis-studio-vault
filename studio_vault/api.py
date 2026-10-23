@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any, Callable, Protocol
 
 from studio_vault import APP_NAME, __version__, checklist, config, content, leave, projects, report
+from studio_vault.handoff import als as handoff_als, check as handoff_check, pluginlist
 from studio_vault import snapshot as snap
 from studio_vault.compare import compare, compare_versions, side_by_side
 from studio_vault.scanners.apps import scan_music_apps
@@ -95,6 +96,8 @@ class Api:
         self._projects_job: dict[str, Any] = {"status": SCAN_IDLE, "done": 0, "total": 0, "source": ""}
         self._projects_thread: threading.Thread | None = None
         self._projects_cancel = threading.Event()
+        self._handoff_set: str = ""
+        self._handoff_receiver: pluginlist.PluginList | None = None
         config.ensure_data_dirs()
         if not self._settings.legacy_import_done:
             snap.import_legacy()
@@ -576,6 +579,72 @@ class Api:
                 missing=projects.missing_summary(checks),
             )
         return self._guard(run)
+
+    # ── Handoff ───────────────────────────────────────────────────────────────
+
+    def handoff_export_plugins(self) -> dict:
+        """Receiver: save the plug-ins this Mac has (one click, then a save dialog)."""
+        def run() -> dict:
+            pl = pluginlist.scan()
+            dest = self._require_native().choose_save_file(
+                f"{_safe_name(pl.machine_name)} plug-ins{pluginlist.FILE_SUFFIX}", ("Plug-in list (*.handoffplugins)",))
+            if not dest:
+                return _ok(cancelled=True)
+            out = pluginlist.save(pl, Path(dest))
+            return _ok(path=str(out), plugins=len(pl.plugins),
+                       live=[f"{i.name} {i.version.split(' ')[0]}" for i in pl.live])
+        return self._guard(run)
+
+    def handoff_choose_set(self) -> dict:
+        def run() -> dict:
+            path = self._require_native().choose_open_file(("Ableton Live Set (*.als)",))
+            if not path:
+                return _ok(cancelled=True)
+            self._handoff_set = path
+            return self.handoff_report()
+        return self._guard(run)
+
+    def handoff_choose_receiver(self) -> dict:
+        def run() -> dict:
+            path = self._require_native().choose_open_file(("Plug-in list (*.handoffplugins)",))
+            if not path:
+                return _ok(cancelled=True)
+            return self.handoff_open_paths([path])
+        return self._guard(run)
+
+    def handoff_open_paths(self, paths: list[str]) -> dict:
+        """A dropped or chosen .als (the set to send) and/or .handoffplugins (the receiver's list)."""
+        try:
+            for p in paths:
+                if p.lower().endswith(pluginlist.FILE_SUFFIX):
+                    self._handoff_receiver = pluginlist.load(p)
+                elif p.lower().endswith(".als"):
+                    self._handoff_set = p
+        except pluginlist.PluginListError as exc:
+            return _fail(str(exc))
+        return self.handoff_report()
+
+    def handoff_clear_receiver(self) -> dict:
+        self._handoff_receiver = None
+        return self.handoff_report()
+
+    def handoff_report(self) -> dict:
+        rec = self._handoff_receiver
+        receiver = None if rec is None else {
+            "name": rec.machine_name, "created_at": rec.created_at, "plugins": len(rec.plugins),
+            "live": [f"{i.name} {i.version.split(' ')[0]}" for i in rec.live]}
+        if not self._handoff_set:
+            return _ok(report=None, receiver=receiver)
+        try:
+            live_set = handoff_als.read(self._handoff_set)
+        except handoff_als.AlsError as exc:
+            return _fail(str(exc))
+        r = handoff_check.check(live_set, rec)
+        return _ok(receiver=receiver, report={
+            "set_name": r.set_name, "set_path": snap.scrub_path(r.set_path), "live_version": r.live_version,
+            "tempo": r.tempo, "level": r.level, "can_pack": r.can_pack, "tracks": len(live_set.tracks),
+            "findings": [asdict(f) for f in r.findings], "plugins": r.plugins, "frozen_tracks": r.frozen_tracks,
+        })
 
     def export_checklist(self, source_id: str, fmt: str = "html") -> dict:
         def run() -> dict:
