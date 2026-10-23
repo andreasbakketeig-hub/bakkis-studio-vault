@@ -76,7 +76,8 @@ class PluginList:
 
     @property
     def has_max_for_live(self) -> bool:
-        return any(i.edition == "Suite" for i in self.live)
+        # The Live trial is a full Suite. Standard needs a separate Max for Live license (not visible here).
+        return any(i.edition in ("Suite", "Trial") for i in self.live)
 
     def newest_live(self) -> LiveInstall | None:
         def key(i: LiveInstall) -> tuple[int, ...]:

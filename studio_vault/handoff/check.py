@@ -15,6 +15,7 @@ Self-contained: standard library only.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 from studio_vault.handoff.als import (KIND_M4L, LOC_EXTERNAL, LOC_PACK, LOC_USER_LIBRARY,
@@ -77,12 +78,17 @@ class _Receiver:
 
 # ── the checks ────────────────────────────────────────────────────────────────
 
+_HOME = re.compile(r"^/Users/[^/]+(?=/|$)")
+
+
 def _names(files) -> list[str]:
-    """File names with the folder they are in, without long ../../ chains."""
+    """File names with the folder they are in: no ../../ chains and never a macOS user name."""
     out = set()
     for f in files:
-        parent = (f.relative_path or f.absolute_path).replace("\\", "/").rstrip("/").rsplit("/", 2)
-        folder = parent[-2] if len(parent) >= 2 and parent[-2] not in ("", "..", ".") else ""
+        rel = f.relative_path.replace("\\", "/")
+        path = rel if rel and ".." not in rel.split("/") else _HOME.sub("~", f.absolute_path.replace("\\", "/"))
+        parent = path.rstrip("/").rsplit("/", 2)
+        folder = parent[-2] if len(parent) >= 2 and parent[-2] not in ("", "..", ".", "~", "Users") else ""
         out.add(f"{f.name} ({folder})" if folder else f.name)
     return sorted(out, key=str.lower)
 
@@ -142,13 +148,16 @@ def check(live_set: LiveSet, receiver: PluginList | None = None) -> Report:
     if m4l_tracks:
         devices = sorted({d for t in live_set.tracks for d in t.max_devices}, key=str.lower)
         outside_m4l = [f for f in files if f.kind == KIND_M4L and f.location in (LOC_EXTERNAL, LOC_USER_LIBRARY)]
-        if receiver and receiver.live and not receiver.has_max_for_live:
-            add(Finding("max_for_live", RED, f"{len(devices)} Max for Live device(s); the receiver has no Live Suite",
-                        "Max for Live needs Live Suite (or a Max for Live license). Freeze or resample those tracks.",
-                        devices))
+        editions = {i.edition for i in receiver.live} if receiver else set()
+        if receiver and receiver.has_max_for_live:
+            add(Finding("max_for_live", GREEN, f"{len(devices)} Max for Live device(s): the receiver has Live Suite",
+                        items=devices))
+        elif receiver and receiver.live and editions <= {"Intro", "Lite"}:
+            add(Finding("max_for_live", RED, f"{len(devices)} Max for Live device(s); the receiver has Live {'/'.join(sorted(editions))}",
+                        "Intro and Lite cannot run Max for Live. Freeze or resample those tracks.", devices))
         else:
             add(Finding("max_for_live", YELLOW, f"{len(devices)} Max for Live device(s)",
-                        "The receiver needs Live Suite or Max for Live."
+                        "The receiver needs Live Suite, or Live Standard with a Max for Live license."
                         + (" Some devices are outside the project folder: " + COLLECT_ALL if outside_m4l else ""),
                         devices))
 

@@ -92,10 +92,18 @@ def test_max_for_live_and_packs(tmp_path):
     s = make(tmp_path, [track("AudioTrack", "FX", m4l(file_ref(3, "Presets/x/Glue.amxd"))
                               + sample(file_ref(5, "Samples/a.wav", "/x/a.wav", pack="Drone Lab"))
                               + sample(file_ref(5, "Devices/b.adv", "/x/b.adv", pack="Core Library")))])
-    k = keys(check.check(s, receiver()))
+    k = keys(check.check(s))
     assert k["max_for_live"] == check.YELLOW and k["packs"] == check.YELLOW and k["core_library"] == check.GREEN
+    suite = receiver()
+    assert keys(check.check(s, suite))["max_for_live"] == check.GREEN
     standard = receiver(live=(("Ableton Live 12 Standard", "12.1.10", "Standard"),))
-    assert keys(check.check(s, standard))["max_for_live"] == check.RED
+    assert keys(check.check(s, standard))["max_for_live"] == check.YELLOW
+    beta = receiver(live=(("Ableton Live 12 Beta", "12.4.5b8", ""),))
+    assert keys(check.check(s, beta))["max_for_live"] == check.YELLOW
+    intro = receiver(live=(("Ableton Live 12 Intro", "12.1.10", "Intro"),))
+    assert keys(check.check(s, intro))["max_for_live"] == check.RED
+    trial = receiver(live=(("Ableton Live 12 Trial", "12.1.10", "Trial"),))
+    assert keys(check.check(s, trial))["max_for_live"] == check.GREEN
 
 
 def test_other_sets_and_no_receiver(tmp_path):
@@ -104,3 +112,11 @@ def test_other_sets_and_no_receiver(tmp_path):
     assert k["other_sets"] == check.YELLOW
     assert k["plugins"] == check.YELLOW            # no receiver list loaded
     assert check.check(s).level == check.YELLOW and check.check(s).can_pack
+
+
+def test_file_labels_never_show_a_user_name(tmp_path):
+    s = make(tmp_path, [track("AudioTrack", "Vox", sample(file_ref(1, "", "/Users/john/vocal.wav"))
+                              + sample(file_ref(1, "../../../../Users/john/Music/take.wav", "/Users/john/Music/take.wav")))])
+    items = {x.key: x for x in check.check(s).findings}["missing_files"].items
+    assert items == ["take.wav (Music)", "vocal.wav"]
+    assert not any("john" in i for i in items)
