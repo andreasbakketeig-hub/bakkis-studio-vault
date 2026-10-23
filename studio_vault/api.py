@@ -20,6 +20,7 @@ import datetime
 import os
 import platform
 import threading
+import urllib.parse
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Callable, Protocol
@@ -29,7 +30,8 @@ from studio_vault import snapshot as snap
 from studio_vault.compare import compare
 from studio_vault.scanners.apps import scan_music_apps
 from studio_vault.scanners.hardware import scan_hardware
-from studio_vault.scanners.plugins import SCAN_PATHS, SizeCache, scan_plugins
+from studio_vault.scanners.plugins import SCAN_PATHS, SizeCache, normalize_product_name, scan_plugins
+from studio_vault.vendors import match_vendor
 
 SCAN_IDLE = "idle"
 SCAN_RUNNING = "running"
@@ -49,6 +51,7 @@ LINKS = {
 class Native(Protocol):
     def choose_open_file(self, file_types: tuple[str, ...]) -> str | None: ...
     def choose_save_file(self, default_name: str, file_types: tuple[str, ...]) -> str | None: ...
+    def choose_folder(self) -> str | None: ...
     def reveal_in_finder(self, path: str) -> None: ...
     def open_url(self, url: str) -> None: ...
     def move_to_trash(self, path: str) -> None: ...
@@ -162,8 +165,28 @@ class Api:
             config.save_settings(self._settings)
             return _ok(settings=asdict(self._settings))
 
+    def add_plugin_folder(self) -> dict:
+        def run() -> dict:
+            folder = self._require_native().choose_folder()
+            if not folder:
+                return _ok(cancelled=True)
+            folders = list(self._settings.extra_plugin_folders)
+            if folder not in folders:
+                folders.append(folder)
+            return self.set_settings({"extra_plugin_folders": folders})
+        return self._guard(run)
+
+    def remove_plugin_folder(self, path: str) -> dict:
+        folders = [f for f in self._settings.extra_plugin_folders if f != path]
+        return self.set_settings({"extra_plugin_folders": folders})
+
     def about(self) -> dict:
-        return _ok(app_name=APP_NAME, version=__version__, macos=platform.mac_ver()[0], links=LINKS)
+        macos = platform.mac_ver()[0]
+        body = (f"What happened:\n\n\nWhat did you expect:\n\n\n"
+                f"---\n{APP_NAME} {__version__} · macOS {macos} · {platform.machine()}")
+        report_url = "mailto:bakkis@bakkis.com?" + urllib.parse.urlencode(
+            {"subject": f"{APP_NAME} {__version__}: problem", "body": body}, quote_via=urllib.parse.quote)
+        return _ok(app_name=APP_NAME, version=__version__, macos=macos, links=LINKS, report_url=report_url)
 
     # ── scanning ──────────────────────────────────────────────────────────────
 
@@ -229,13 +252,56 @@ class Api:
     # ── current scan & changes ────────────────────────────────────────────────
 
     @staticmethod
-    def _summary(s: snap.Snapshot) -> dict:
+    def _products(s: snap.Snapshot) -> list[dict]:
+        """Plug-ins grouped per product (all formats in one row) with their vendor."""
+        groups: dict[str, dict] = {}
+        for p in s.plugins:
+            g = groups.setdefault(normalize_product_name(p.name), {
+                "name": p.name, "developer": "", "bundle_id": "", "version": "",
+                "formats": [], "size": 0, "path": p.path,
+            })
+            if p.fmt not in g["formats"]:
+                g["formats"].append(p.fmt)
+            g["size"] += p.size
+            for key in ("developer", "bundle_id", "version"):
+                g[key] = g[key] or getattr(p, key)
+        order = ["VST3", "AU", "CLAP", "VST", "AAX"]
+        out = []
+        for g in groups.values():
+            vendor = match_vendor(g["developer"], g["bundle_id"])
+            g["vendor"] = vendor.name if vendor else g["developer"]
+            g["matched"] = vendor is not None
+            g["formats"].sort(key=lambda f: order.index(f) if f in order else len(order))
+            del g["bundle_id"]
+            out.append(g)
+        return sorted(out, key=lambda g: g["name"].lower())
+
+    def _summary(self, s: snap.Snapshot) -> dict:
+        products = self._products(s)
+        vendors = {p["vendor"] for p in products if p["vendor"]}
+        matched = sum(1 for p in products if p["matched"])
         return {
             "id": s.id, "name": s.name, "machine_name": s.machine_name, "created_at": s.created_at,
             "plugin_count": len(s.plugins), "app_count": len(s.apps), "hardware_count": len(s.hardware),
+            "product_count": len(products), "vendor_count": len(vendors),
+            "matched_pct": round(100 * matched / len(products)) if products else 0,
             "plugin_formats": s.plugin_formats,
             "plugin_bytes": sum(p.size for p in s.plugins),
+            "app_names": [a.name for a in s.apps[:3]],
+            "hardware_names": [h.name for h in s.hardware[:3]],
         }
+
+    def inventory(self, snapshot_id: str) -> dict:
+        """Inventory tables: plug-in products, apps and hardware of one snapshot."""
+        def run() -> dict:
+            s = self._load(snapshot_id)
+            return _ok(
+                snapshot={"id": s.id, "name": s.name, "created_at": s.created_at},
+                products=self._products(s),
+                apps=[asdict(a) for a in s.apps],
+                hardware=[asdict(h) for h in s.hardware],
+            )
+        return self._guard(run)
 
     @staticmethod
     def _changes_dict(old: snap.Snapshot, new: snap.Snapshot) -> dict:

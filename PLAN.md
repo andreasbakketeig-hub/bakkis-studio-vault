@@ -1,6 +1,6 @@
 # BAKKIS STUDIO VAULT v2 — rebuild plan
 
-Status: milestones 1–4 done 2026-10-23 (scanners, vendors, snapshots, compare, checklist, reports, pywebview app shell with background scan, dialogs and drag-and-drop; run with `.venv/bin/python -m studio_vault`). Next: milestone 5 (full frontend). Branch `v2-pywebview` (off `feature/license-vault`).
+Status: milestones 1–5 done 2026-10-23 (backend, app shell, full UI per the approved design canvas: My Studio, Snapshots + compare, New Mac checklist, Inventory, settings drawer, first launch; run with `.venv/bin/python -m studio_vault`). Next: milestone 6 (packaging, README, LICENSE). Branch `v2-pywebview` (off `feature/license-vault`).
 Owner: Andreas (BAKKIS). Communicate with him in Norwegian; code, comments and commits in English.
 
 ## Goal
@@ -122,7 +122,7 @@ tests/             pytest: scanners (with recorded system_profiler fixtures), sn
 
 ## UX design (direction, to agree in chat)
 
-Milestone 5 to-dos noticed while testing the shell: dark window title bar to match the app; format dates in English (the shell uses the system locale, e.g. "23. okt.").
+Approved design: the "Studio Vault v2 – skjermdesign" canvas (6 screens), built in milestone 5.
 
 One window, left rail with four items, dark theme like Music Sorter (`-apple-system`, 8 px grid, one accent).
 

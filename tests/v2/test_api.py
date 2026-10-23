@@ -24,6 +24,7 @@ class FakeNative:
         self.tmp = tmp
         self.open_result: str | None = None
         self.save_result: str | None = None
+        self.folder_result: str | None = None
         self.revealed: list[str] = []
         self.opened: list[str] = []
         self.trashed: list[str] = []
@@ -34,6 +35,9 @@ class FakeNative:
     def choose_save_file(self, default_name, file_types):
         self.last_default_name = default_name
         return self.save_result
+
+    def choose_folder(self):
+        return self.folder_result
 
     def reveal_in_finder(self, path):
         self.revealed.append(path)
@@ -302,3 +306,42 @@ class TestBridge:
         bridge = NativeBridge(SimpleNamespace(evaluate_js=calls.append))
         bridge.on_drop({"dataTransfer": {"files": [{"pywebviewFullPath": str(tmp_path / "x.mp3")}]}})
         assert "warning" in calls[0]
+
+
+def test_inventory_groups_formats_per_product(vault, scanners):
+    scanners["plugins"].append(Plugin("Serum", "AU", "/Library/Audio/Plug-Ins/Components/Serum.component",
+                                      "1.36", "Xfer Records", "", 40))
+    run_scan(vault)
+    inv = vault.inventory("current")
+    serum = next(p for p in inv["products"] if p["name"] == "Serum")
+    assert serum["formats"] == ["VST3", "AU"]
+    assert serum["size"] == 140
+    assert serum["vendor"] == "Xfer Records" and serum["matched"]
+    assert [p["name"] for p in inv["products"]] == ["Pro-Q 3", "Serum"]
+    assert inv["apps"][0]["name"] == "Ableton Live 12 Suite"
+    assert inv["hardware"][0]["name"] == "BiG SiX"
+
+
+def test_summary_counts(vault):
+    run_scan(vault)
+    cur = vault.state()["current"]
+    assert cur["product_count"] == 2
+    assert cur["vendor_count"] == 2
+    assert cur["matched_pct"] == 100
+    assert cur["hardware_names"] == ["BiG SiX"]
+
+
+def test_add_and_remove_plugin_folder(vault, native):
+    assert vault.add_plugin_folder() == {"ok": True, "cancelled": True}
+    native.folder_result = "/Volumes/Plugins SSD/VST3"
+    vault.add_plugin_folder()
+    vault.add_plugin_folder()  # no duplicates
+    assert vault.state()["settings"]["extra_plugin_folders"] == ["/Volumes/Plugins SSD/VST3"]
+    vault.remove_plugin_folder("/Volumes/Plugins SSD/VST3")
+    assert vault.state()["settings"]["extra_plugin_folders"] == []
+
+
+def test_report_problem_mail_is_prefilled(vault):
+    url = vault.about()["report_url"]
+    assert url.startswith("mailto:bakkis@bakkis.com?subject=")
+    assert "macOS" in url and " " not in url

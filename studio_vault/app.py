@@ -22,6 +22,7 @@ from studio_vault.config import bundle_dir
 from studio_vault.snapshot import FILE_SUFFIX
 
 OPEN_DIALOG = 10   # webview.FileDialog.OPEN
+FOLDER_DIALOG = 20  # webview.FileDialog.FOLDER
 SAVE_DIALOG = 30   # webview.FileDialog.SAVE
 WINDOW_SIZE = (1240, 820)
 MIN_SIZE = (900, 620)
@@ -56,6 +57,9 @@ class NativeBridge:
             save_filename=default_name, file_types=file_types)
         return self._first(result)
 
+    def choose_folder(self) -> str | None:
+        return self._first(self.window.create_file_dialog(FOLDER_DIALOG, directory="/Volumes"))
+
     @staticmethod
     def _first(result: Any) -> str | None:
         if not result:
@@ -85,15 +89,30 @@ class NativeBridge:
     # ── Window lifecycle ──────────────────────────────────────────────────────
 
     def on_loaded(self) -> None:
-        """Register the drop handler once (the page is never reloaded)."""
+        """Dark title bar, and register the drop handler once (the page is never reloaded)."""
         with self._lock:
             if self._drop_registered:
                 return
             self._drop_registered = True
+        self._dark_title_bar()
         from webview.dom import DOMEventHandler
 
         self.window.dom.document.events.drop += DOMEventHandler(
             self.on_drop, prevent_default=True, stop_propagation=False)
+
+    def _dark_title_bar(self) -> None:
+        """Match the window chrome to the dark UI, whatever the system appearance is."""
+        native = getattr(self.window, "native", None)
+        if native is None:
+            return
+        try:
+            from AppKit import NSAppearance
+            from PyObjCTools import AppHelper
+
+            dark = NSAppearance.appearanceNamed_("NSAppearanceNameDarkAqua")
+            AppHelper.callAfter(lambda: native.setAppearance_(dark))
+        except Exception:  # noqa: BLE001 - cosmetic only
+            pass
 
     def on_drop(self, event: dict) -> None:
         files = ((event or {}).get("dataTransfer") or {}).get("files") or []
