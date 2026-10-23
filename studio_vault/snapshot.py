@@ -91,6 +91,16 @@ class SnapHardware:
     connection_type: str = ""
 
 
+@dataclass(frozen=True)
+class SnapContent:
+    """A presets / user content folder worth backing up (see content.py)."""
+    label: str
+    path: str = ""          # ~/…
+    size: int = 0
+    files: int = 0
+    approximate: bool = False
+
+
 @dataclass
 class Snapshot:
     id: str
@@ -105,6 +115,7 @@ class Snapshot:
     plugins: list[SnapPlugin] = field(default_factory=list)
     apps: list[SnapApp] = field(default_factory=list)
     hardware: list[SnapHardware] = field(default_factory=list)
+    content: list[SnapContent] = field(default_factory=list)
 
     @property
     def plugin_formats(self) -> dict[str, int]:
@@ -190,6 +201,7 @@ def from_scan(
     apps: Iterable[Any],
     hardware: Iterable[Any],
     name: str = "",
+    content: Iterable[Any] = (),
 ) -> Snapshot:
     """Build a snapshot from scanner results (scanners.plugins/apps/hardware objects)."""
     machine = this_machine_name()
@@ -225,6 +237,7 @@ def from_scan(
             ) for h in hardware),
             key=lambda h: h.name.lower(),
         ),
+        content=[SnapContent(c.label, scrub_path(c.path), c.size, c.files, c.approximate) for c in content],
     )
 
 
@@ -267,6 +280,11 @@ def _hardware(d: dict) -> SnapHardware:
     )
 
 
+def _content(d: dict) -> SnapContent:
+    return SnapContent(label=_s(d, "label"), path=scrub_path(_s(d, "path")), size=_i(d, "size"),
+                       files=_i(d, "files"), approximate=d.get("approximate") is True)
+
+
 def _clean_machine_id(raw: str) -> str:
     """v2 ids are already hashed (16 hex); anything else (v1 raw UUID) gets hashed."""
     if re.fullmatch(r"[0-9a-f]{16}", raw):
@@ -296,6 +314,7 @@ def parse(data: Any) -> Snapshot:
             plugins=[_plugin(p) for p in _dicts(data.get("plugins"))],
             apps=[_app(a) for a in _dicts(data.get("apps"))],
             hardware=[_hardware(h) for h in _dicts(data.get("hardware"))],
+            content=[_content(c) for c in _dicts(data.get("content"))],
         )
 
     # v1 "Studio Snapshots" (app/core/studio_snapshots.py, schema_version 1)

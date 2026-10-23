@@ -129,6 +129,18 @@ def test_corrupt_state_file_is_ignored():
     assert cl.load_state("old") == {"plugin:serum"}
 
 
+def test_content_folders_on_new_mac():
+    from studio_vault.snapshot import SnapContent
+    old = _snap(plugins=[])
+    old.content = [SnapContent("FabFilter presets", "~/Documents/FabFilter", 10_000), SnapContent("Splice samples", "~/Splice", 5)]
+    new = _snap(id="new")
+    new.content = [SnapContent("FabFilter presets", "~/Documents/FabFilter", 9_000)]
+    c = cl.build(old, new, manual_done=set())
+    st = {i.name: i.status for i in c.content}
+    assert st == {"FabFilter presets": cl.STATUS_INSTALLED, "Splice samples": cl.STATUS_MISSING}
+    assert c.total == 2
+
+
 def test_compatibility_warnings_for_new_apple_silicon_mac():
     old = _snap(plugins=[SnapPlugin("Absynth 5", "VST", "Native Instruments", "5.3", arch="intel"),
                          SnapPlugin("Absynth 5", "AU", "Native Instruments", "5.3", arch="intel"),

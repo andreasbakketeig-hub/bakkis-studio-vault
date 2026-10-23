@@ -133,6 +133,7 @@ class TestParse:
         s = _scan_snapshot()
         s.plugins[0] = type(s.plugins[0])(**{**s.plugins[0].__dict__, "arch": "intel", "min_macos": "10.13"})
         s.cpu = "arm64"
+        s.content = [snap.SnapContent("Splice samples", "~/Splice", 123, 4, True)]
         again = snap.parse(json.loads(json.dumps(s.to_dict())))
         assert again == s
 

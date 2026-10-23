@@ -13,7 +13,7 @@ const ui = {
   snapshots: [],
   changeFilter: "all",
   studioChanges: null,
-  newmac: { mode: "new", sourceId: "", data: null, filter: "missing", q: "", open: new Set(), leave: null },
+  newmac: { mode: "new", sourceId: "", picked: false, data: null, filter: "missing", q: "", open: new Set(), leave: null },
   cmp: { a: "", b: "", data: null, filter: "diff", q: "", open: new Set() },
   proj: { target: "", data: null, job: null, filter: "need", q: "", limit: 100 },
   inv: { id: "", data: null, tab: "plugins", q: "", fmt: "", kind: "", vendor: "", arch: "", sort: "name", dir: 1 },
@@ -341,7 +341,7 @@ function renderSnapshots() {
         el("div", { class: "title" }, s.name, s.id === latestMine ? el("span", { class: "badge" }, "Latest") : null),
         el("div", { class: "meta" }, `${s.is_this_mac ? "" : "Imported · "}${fmtDate(s.created_at)} · ${plural(s.plugin_count, "plug-in")} · ${plural(s.app_count, "app")} · ${num(s.hardware_count)} hardware`)),
       thisMacId() && thisMacId() !== s.id ? el("button", { class: "link", onclick: () => openCompare(thisMacId(), s.id) }, "Compare") : null,
-      s.is_this_mac ? null : el("button", { class: "link", onclick: () => { ui.newmac.sourceId = s.id; show("newmac"); } }, "Make checklist"),
+      s.is_this_mac ? null : el("button", { class: "link", onclick: () => { Object.assign(ui.newmac, { sourceId: s.id, picked: true, mode: "new" }); show("newmac"); } }, "Make checklist"),
       el("button", { class: "link", onclick: () => renameSnapshot(s) }, "Rename"),
       el("button", { class: "link", onclick: () => exportSnapshot(s.id) }, "Export…"),
       el("button", { class: "link danger", onclick: () => trashSnapshot(s) }, "Move to Trash"));
@@ -389,7 +389,7 @@ async function importSnapshot() {
   if (res.ok && !res.cancelled) {
     toast(`Imported “${res.name}”.`);
     await refresh();
-    ui.newmac.sourceId = res.id;
+    Object.assign(ui.newmac, { sourceId: res.id, picked: true });
     render();
   }
   return res;
@@ -640,7 +640,8 @@ async function loadNewMac() {
     nm.leave = res.ok ? res.leave : null;
     return renderLeave();
   }
-  if (!nm.sourceId || !ui.snapshots.some((s) => s.id === nm.sourceId)) nm.sourceId = defaultSource();
+  // Follow the best default (another Mac's snapshot) until the user picks a source by hand.
+  if (!nm.picked || !ui.snapshots.some((s) => s.id === nm.sourceId)) nm.sourceId = defaultSource();
   if (!nm.sourceId) { nm.data = null; return renderNewMac(); }
   const res = await call("checklist", nm.sourceId);
   nm.data = res.ok ? res.checklist : null;
@@ -648,6 +649,10 @@ async function loadNewMac() {
 }
 
 function itemStatus(i) {
+  if (i.kind === "content") {
+    if (i.status === "installed") return el("span", { class: "st ok" }, "Found on this Mac");
+    return el("span", { class: i.manual_done ? "st tick" : "st miss" }, i.manual_done ? "Ticked" : "Copy back");
+  }
   if (i.status === "installed") return el("span", { class: "st ok" }, i.kind === "hardware" ? "Connected" : "Installed");
   if (i.manual_done) return el("span", { class: "st tick" }, "Ticked");
   if (i.status === "partial") return el("span", { class: "st part" }, `Missing ${i.missing_formats.join(", ")}`);
@@ -657,7 +662,8 @@ function itemStatus(i) {
 function itemRow(i) {
   const auto = i.status === "installed";
   const id = `it-${i.id}`;
-  const detail = i.kind === "plugin" ? i.formats.join(" · ") : (i.kind === "app" ? "app" : [i.vendor, i.category].filter(Boolean).join(" · "));
+  const detail = i.kind === "plugin" ? i.formats.join(" · ") : i.kind === "app" ? "app"
+    : i.kind === "content" ? `${i.category} · ${fmtBytes(i.size)}` : [i.vendor, i.category].filter(Boolean).join(" · ");
   return el("div", { class: "item" },
     el("input", { type: "checkbox", id, checked: i.done, disabled: auto,
                   title: auto ? "Found on this Mac" : "Tick when done", onchange: (e) => tick(i.id, e.target.checked) }),
@@ -699,7 +705,7 @@ function renderNewMac() {
   }
 
   const pct = c.total ? Math.round(100 * c.done_count / c.total) : 100;
-  const select = el("select", { class: "select", onchange: (e) => { nm.sourceId = e.target.value; nm.open.clear(); loadNewMac(); } },
+  const select = el("select", { class: "select", onchange: (e) => { nm.sourceId = e.target.value; nm.picked = true; nm.open.clear(); loadNewMac(); } },
     [...ui.snapshots].sort((a, b) => (a.is_this_mac === b.is_this_mac ? 0 : a.is_this_mac ? 1 : -1))
       .map((s) => el("option", { value: s.id, selected: s.id === nm.sourceId }, `${s.name} — ${fmtDate(s.created_at, false)}`)));
   const source = el("div", { class: "card source" },
@@ -709,7 +715,7 @@ function renderNewMac() {
     el("div", { class: "meter", style: "margin-top: 16px; height: 8px", role: "progressbar", "aria-valuenow": pct, "aria-valuemin": 0, "aria-valuemax": 100, "aria-label": "Checklist progress" },
       el("div", { style: `width: ${pct}%` })));
 
-  const all = [...c.groups.flatMap((g) => g.items), ...c.hardware];
+  const all = [...c.groups.flatMap((g) => g.items), ...c.hardware, ...(c.content || [])];
   const missing = all.filter((i) => !i.done).length;
   const filters = [["all", "All"], ["missing", `Missing ${num(missing)}`], ["done", `Done ${num(c.done_count)}`]];
   const q = nm.q.trim().toLowerCase();
@@ -764,6 +770,14 @@ function renderNewMac() {
         el("p", { class: "step" }, "Connect each device and install its driver or control app."),
         el("div", {}, hw.map(itemRow))));
     }
+    const content = (c.content || []).filter((i) => hit(null, i) && matchesFilter(i));
+    if (content.length) {
+      cards.push(el("section", { class: "card group" },
+        el("div", { class: "group-head" }, el("h2", {}, "Presets and your own content"),
+          el("span", { class: "muted", style: "font-size: var(--fs-s)" }, `${c.content.filter((i) => i.done).length} of ${c.content.length} back`)),
+        el("p", { class: "step" }, "Copy these folders back from your backup. Migration Assistant or Time Machine can bring them over for you."),
+        el("div", {}, content.map(itemRow))));
+    }
     if (doneCards.length) {
       cards.push(el("section", { class: "card group" },
         el("div", { class: "group-head" }, el("h2", {}, "Already done"), el("span", { class: "done-count" }, `✓ ${doneCards.length} vendors`)),
@@ -794,7 +808,14 @@ function renderLeave() {
           i.products.slice(0, 8).join(", ") + (i.products.length > 8 ? ` and ${num(i.products.length - 8)} more` : "")) : null),
       extra);
   };
-  const all = [...L.snapshot, ...L.licenses, ...L.finish];
+  const all = [...L.snapshot, ...L.backup, ...L.licenses, ...L.finish];
+  let n = 1;
+  const num_ = () => `${n++} · `;
+  const folderRow = (f) => el("div", { class: "item" },
+    el("span", { class: "name" }, f.label, el("span", { class: "muted", style: "display: block; font-size: var(--fs-s); font-family: var(--mono)" }, f.path)),
+    el("span", { class: "muted", style: "font-size: var(--fs-s); white-space: nowrap" }, `${fmtBytes(f.size)}${f.approximate ? "+" : ""}`),
+    el("button", { class: "icon-btn row-btn", "aria-label": `Show ${f.label} in Finder`, title: "Show in Finder", onclick: () => call("reveal", f.path) },
+      svg(["M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"])));
   const done = all.filter((i) => i.done).length;
   const parts = [head, modeSwitch(),
     el("div", { class: "card source" },
@@ -804,17 +825,21 @@ function renderLeave() {
         el("div", { class: "big" }, num(done), el("span", {}, ` of ${num(all.length)} done`))),
       L.snapshot_is_fresh ? null : el("p", { class: "warn-note", style: "margin: 12px 0 0" }, "That scan is more than a day old. Scan again right before you move.")),
     el("section", { class: "card group", style: "margin-top: 16px" },
-      el("div", { class: "group-head" }, el("h2", {}, "1 · Snapshot")),
+      el("div", { class: "group-head" }, el("h2", {}, `${num_()}Snapshot`)),
       row(L.snapshot[0], [el("button", { class: "btn small", onclick: () => exportSnapshot(L.export_id) }, "Export…")])),
+    L.backup.length ? el("section", { class: "card group" },
+      el("div", { class: "group-head" }, el("h2", {}, `${num_()}Presets and your own content`),
+        el("span", { class: "muted", style: "font-size: var(--fs-s)" }, plural(L.folders.length, "folder"))),
+      row(L.backup[0]), L.folders.map(folderRow)) : null,
     el("section", { class: "card group" },
-      el("div", { class: "group-head" }, el("h2", {}, "2 · Licenses tied to this Mac"),
+      el("div", { class: "group-head" }, el("h2", {}, `${num_()}Licenses tied to this Mac`),
         el("span", { class: "muted", style: "font-size: var(--fs-s)" }, plural(L.licenses.length, "vendor"))),
       L.licenses.length ? L.licenses.map((i) => row(i, i.url ? [el("button", { class: "link", onclick: () => call("open_url", i.url) }, "Vendor ↗")] : []))
         : el("p", { class: "muted", style: "margin: 8px 0 0" }, "Nothing found that is known to be tied to this computer."),
       el("p", { class: "muted", style: "margin: 12px 0 0; font-size: var(--fs-s)" },
         "Most other vendors use an account: you just sign in on the new Mac. Some limit how many computers can be active at once; if you hit that limit, deactivate this Mac in their app or on their website.")),
     el("section", { class: "card group" },
-      el("div", { class: "group-head" }, el("h2", {}, "3 · Move to the new Mac")),
+      el("div", { class: "group-head" }, el("h2", {}, `${num_()}Move to the new Mac`)),
       L.finish.map((i) => row(i)))];
   root.replaceChildren(...parts);
 }

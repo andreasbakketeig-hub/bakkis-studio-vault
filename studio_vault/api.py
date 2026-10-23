@@ -25,13 +25,13 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Callable, Protocol
 
-from studio_vault import APP_NAME, __version__, checklist, config, leave, projects, report
+from studio_vault import APP_NAME, __version__, checklist, config, content, leave, projects, report
 from studio_vault import snapshot as snap
 from studio_vault.compare import compare, compare_versions, side_by_side
 from studio_vault.scanners.apps import scan_music_apps
 from studio_vault.scanners.hardware import scan_hardware
 from studio_vault.scanners.plugins import ARCH_INTEL, FORMAT_ORDER, SCAN_PATHS, SizeCache, normalize_product_name, scan_plugins
-from studio_vault.vendors import match_vendor
+from studio_vault.vendors import VENDORS, match_vendor
 
 SCAN_IDLE = "idle"
 SCAN_RUNNING = "running"
@@ -239,8 +239,13 @@ class Api:
             hardware = scan_hardware(debug_log=False).devices
             if self._cancel.is_set():
                 return self._finish(SCAN_CANCELLED)
+            self._progress("content", "Measuring presets and your own content…")
+            vendor_names = {p.developer for p in plugins.plugins if p.developer} | {v.name for v in VENDORS}
+            user_content = content.find(vendor_names)
+            if self._cancel.is_set():
+                return self._finish(SCAN_CANCELLED)
 
-            current = snap.from_scan(plugins.plugins, apps, hardware)
+            current = snap.from_scan(plugins.plugins, apps, hardware, content=user_content)
             previous = snap.latest_for_this_mac()
             changes = self._changes_dict(previous, current) if previous else None
             saved_id = ""
@@ -468,6 +473,7 @@ class Api:
                 "done_count": g.done_count, "next_step": g.next_step,
             } for g in c.groups],
             "hardware": [item(i) for i in c.hardware],
+            "content": [item(i) for i in c.content],
         }
 
     def checklist_tick(self, source_id: str, item_id: str, done: bool) -> dict:

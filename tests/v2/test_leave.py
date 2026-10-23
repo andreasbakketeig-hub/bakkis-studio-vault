@@ -31,6 +31,17 @@ def test_waveshells_collapse():
     assert w.products == ["WaveShell (all Waves plug-ins)"]
 
 
+def test_backup_step_lists_content_folders():
+    from studio_vault.snapshot import SnapContent
+    mac = _mac()
+    assert leave.build(mac, manual=set()).backup == []
+    mac.content = [SnapContent("Ableton Live User Library", "~/Music/Ableton/User Library", 16_000_000_000, 38000, True)]
+    lst = leave.build(mac, manual=set())
+    assert [i.id for i in lst.backup] == [leave.STEP_BACKUP]
+    assert lst.folders[0]["path"] == "~/Music/Ableton/User Library"
+    assert lst.folders[0]["approximate"] is True
+
+
 def test_ilok_reminder_from_installed_app_only():
     lst = leave.build(_mac(apps=[SnapApp("iLok License Manager")]), manual=set())
     assert [i.id for i in lst.licenses] == ["license:ilok"]

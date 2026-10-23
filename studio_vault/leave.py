@@ -23,6 +23,7 @@ LEAVE_ID = "leave-this-mac"
 
 STEP_SNAPSHOT = "step:snapshot"
 STEP_COPY = "step:copy"
+STEP_BACKUP = "step:backup"
 
 
 @dataclass
@@ -42,11 +43,13 @@ class LeaveList:
     snapshot_created_at: str
     snapshot_is_fresh: bool
     snapshot: list[LeaveItem] = field(default_factory=list)
+    backup: list[LeaveItem] = field(default_factory=list)
+    folders: list[dict] = field(default_factory=list)     # presets / user content to back up
     licenses: list[LeaveItem] = field(default_factory=list)
     finish: list[LeaveItem] = field(default_factory=list)
 
     def all_items(self) -> list[LeaveItem]:
-        return self.snapshot + self.licenses + self.finish
+        return self.snapshot + self.backup + self.licenses + self.finish
 
 
 def _is_fresh(created_at: str, now: datetime.datetime | None = None) -> bool:
@@ -66,6 +69,15 @@ def build(this_mac: Snapshot, manual: set[str] | None = None) -> LeaveList:
         STEP_SNAPSHOT, "Scan this Mac and export the snapshot",
         "Scan right before you move so nothing is missed, then use Export… to save the .studiovault file.",
         done=STEP_SNAPSHOT in ticks))
+
+    if this_mac.content:
+        out.backup.append(LeaveItem(
+            STEP_BACKUP, "Back up presets and your own content",
+            "Installers bring plug-ins back, not your presets, patches and libraries. "
+            "Copy these folders to a backup drive (or let Migration Assistant or Time Machine bring them over).",
+            done=STEP_BACKUP in ticks))
+        out.folders = [{"label": c.label, "path": c.path, "size": c.size, "approximate": c.approximate}
+                       for c in this_mac.content]
 
     # Vendors on this Mac whose licenses are tied to the computer.
     by_vendor: dict[str, LeaveItem] = {}

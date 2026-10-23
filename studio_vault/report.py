@@ -68,6 +68,8 @@ def checklist_csv(checklist: Checklist, dest: Path) -> Path:
                          g.manager_app, g.license_system, g.download_url])
     for i in checklist.hardware:
         rows.append([i.vendor, i.kind, i.name, "", "", item_status_text(i), "", "", i.download_url])
+    for i in checklist.content:
+        rows.append(["", i.kind, i.name, "", i.category, item_status_text(i), "", "", ""])
     return _write_csv(dest, ["Vendor", "Type", "Name", "Old version", "Formats", "Status",
                              "Installer app", "License", "Download"], rows)
 
@@ -169,6 +171,22 @@ def _hardware_html(items: list[ChecklistItem]) -> str:
     )
 
 
+def _content_html(items: list[ChecklistItem]) -> str:
+    if not items:
+        return ""
+    rows = "".join(
+        f'<li class="{"done" if i.done else ""}"><span class="box">{"✓" if i.done else ""}</span>'
+        f'<span class="name">{_e(i.name)} <span class="muted">— {_e(i.category)}</span></span>'
+        f'<span class="st {"ok" if i.done else "miss"}">{"Back" if i.done else "Copy back"}</span></li>'
+        for i in items)
+    return (
+        '<section><div class="head"><h2>Presets and your own content</h2>'
+        f'<span class="muted">{sum(1 for i in items if i.done)} / {len(items)}</span></div>'
+        '<div class="step">Copy these folders back from your backup (Migration Assistant or Time Machine can do it).</div>'
+        f'<ul>{rows}</ul></section>'
+    )
+
+
 def checklist_html(checklist: Checklist) -> str:
     title = f"New Mac checklist — {checklist.source_name}"
     pct = round(100 * checklist.done_count / checklist.total) if checklist.total else 100
@@ -182,6 +200,7 @@ def checklist_html(checklist: Checklist) -> str:
         f'<div class="progress">{checklist.done_count} of {checklist.total} done ({pct}%)</div>'
         + "".join(_group_html(g) for g in checklist.groups)
         + _hardware_html(checklist.hardware)
+        + _content_html(checklist.content)
         + f"<footer>{_e(APP_NAME)} {_e(__version__)} · Read-only: nothing on your Mac was changed."
         " License keys are never included in this report.</footer></body></html>"
     )

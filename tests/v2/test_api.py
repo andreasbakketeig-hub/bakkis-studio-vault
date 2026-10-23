@@ -67,7 +67,7 @@ HARDWARE = [SimpleNamespace(name="BiG SiX", vendor="Solid State Logic", device_t
 @pytest.fixture
 def scanners():
     """Fake scanners; tests mutate the lists to simulate a changed studio."""
-    state = {"plugins": list(PLUGINS), "apps": list(APPS), "hardware": list(HARDWARE)}
+    state = {"plugins": list(PLUGINS), "apps": list(APPS), "hardware": list(HARDWARE), "content": []}
     with patch.object(snap, "this_machine_id", return_value=THIS_MAC), \
          patch.object(snap, "this_machine_name", return_value="Studio Mac"), \
          patch.object(api_mod, "scan_plugins",
@@ -75,7 +75,8 @@ def scanners():
                       ScanResult(plugins=list(state["plugins"]))), \
          patch.object(api_mod, "scan_music_apps", side_effect=lambda progress_cb=None: list(state["apps"])), \
          patch.object(api_mod, "scan_hardware",
-                      side_effect=lambda debug_log=False: SimpleNamespace(devices=list(state["hardware"]))):
+                      side_effect=lambda debug_log=False: SimpleNamespace(devices=list(state["hardware"]))), \
+         patch.object(api_mod.content, "find", side_effect=lambda names: list(state["content"])):
         yield state
 
 

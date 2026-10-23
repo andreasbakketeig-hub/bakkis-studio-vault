@@ -39,6 +39,7 @@ from studio_vault.vendors import (
 KIND_PLUGIN = "plugin"
 KIND_APP = "app"
 KIND_HARDWARE = "hardware"
+KIND_CONTENT = "content"
 
 STATUS_INSTALLED = "installed"
 STATUS_PARTIAL = "partial"
@@ -57,6 +58,7 @@ class ChecklistItem:
     category: str = ""            # apps: DAW, Plugin Manager … / hardware: device type
     vendor: str = ""              # hardware only
     warnings: list[str] = field(default_factory=list)   # e.g. Intel-only on an Apple Silicon Mac
+    size: int = 0                 # content folders: bytes on the old Mac
     download_url: str = ""        # hardware only: vendor driver page when known
     status: str = STATUS_MISSING  # automatic, from the current scan
     manual_done: bool = False
@@ -96,9 +98,10 @@ class Checklist:
     source_created_at: str
     groups: list[VendorGroup] = field(default_factory=list)   # software, by vendor
     hardware: list[ChecklistItem] = field(default_factory=list)
+    content: list[ChecklistItem] = field(default_factory=list)   # presets and user folders to copy back
 
     def all_items(self) -> list[ChecklistItem]:
-        return [i for g in self.groups for i in g.items] + list(self.hardware)
+        return [i for g in self.groups for i in g.items] + list(self.hardware) + list(self.content)
 
     @property
     def total(self) -> int:
@@ -219,9 +222,18 @@ def build(source: Snapshot, current: Snapshot, manual_done: set[str] | None = No
     ordered = sorted(groups.values(), key=lambda g: (g.key == OTHER_GROUP_KEY, g.name.lower()))
     hardware.sort(key=lambda i: i.name.lower())
 
+    # Presets and your own content: "back" once the folder exists on this Mac.
+    current_paths = {c.path for c in current.content}
+    content_items = [ChecklistItem(
+        id=_item_id(KIND_CONTENT, c.path), kind=KIND_CONTENT, name=c.label, category=c.path,
+        size=c.size,
+        status=STATUS_INSTALLED if c.path in current_paths else STATUS_MISSING,
+        manual_done=_item_id(KIND_CONTENT, c.path) in manual,
+    ) for c in source.content]
+
     return Checklist(
         source_id=source.id, source_name=source.name, source_created_at=source.created_at,
-        groups=ordered, hardware=hardware,
+        groups=ordered, hardware=hardware, content=content_items,
     )
 
 
