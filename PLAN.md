@@ -1,6 +1,6 @@
 # BAKKIS STUDIO VAULT v2 — rebuild plan
 
-Status: milestones 1–6 done 2026-10-23. Universal .app builds with `./build_mac_app.sh` (17 MB zip) and runs; README, PACKAGING.md, LICENSE, FUNDING.yml and the "Hi, I'm BAKKIS" card match Music Sorter. Open: navigation around the three jobs (overview / migrate / compare), milestone 7 (real two-Mac test), milestone 8 (merge, tag v2.0.0, release). Branch `v2-pywebview`.
+Status: milestones 1–6 done, plus the six niche features from the competitor review (2026-10-24): Compare screen, Apple Silicon / macOS check, Before you leave the old Mac, Project check for Ableton Live, presets and user content, hardware details. Menu: My Studio, Compare, New Mac, Projects; Inventory and Snapshots under More. Next: milestone 7 (real two-Mac test), milestone 8 (merge, tag v2.0.0, release). Branch `v2-pywebview`.
 Owner: Andreas (BAKKIS). Communicate with him in Norwegian; code, comments and commits in English.
 
 ## Goal
@@ -77,6 +77,20 @@ hardware) as a **snapshot over time** with a **new-Mac migration checklist**. Th
 9. **`main` is behind**: all work since "Cleanup Recommendation Actionability Layer" lives on `feature/license-vault`. Stale branch `cursor/format-analysis-view` is already merged.
 10. **Core MIDI fallback in `hardware_scanner.py` segfaults** on this Mac (pointers passed to `CFRelease` without argtypes get truncated). Only hit when `system_profiler SPMIDIDataType` is empty, which it is here. Fixed in v2 by reusing the MIDI scanner's Core MIDI reader; v1 still has the bug.
 11. **USB scan finds nothing on current macOS**: `system_profiler SPUSBDataType` is empty there; devices are under `SPUSBHostDataType` with different keys. v2 falls back to it; v1 still misses USB devices.
+
+## Added after the competitor review (2026-10-24, approved by Andreas)
+
+Competitors (Plugin Station, PluginHub, Pluginize!, AAX Plugin Manager, PlugPane …) are plug-in managers.
+Studio Vault stays the whole-studio snapshot / migrate / compare tool, free and offline:
+
+1. **Compare**: two Macs side by side per vendor (only on A / only on B / different).
+2. **Apple Silicon and macOS check**: Intel-only binaries and LSMinimumSystemVersion read from the files.
+3. **Before you leave the old Mac**: export the snapshot, deactivate machine-bound licenses (Waves, iLok, Steinberg), back up content.
+4. **Project check**: Ableton Live sets (.als) against this Mac or a snapshot; missing plug-ins and wrong formats.
+5. **Presets and your own content**: folders to back up and copy back, with sizes.
+6. **Hardware details**: channels, sample rate, control app.
+
+Still out of scope: update checking, uninstall, enable/disable, shop.
 
 ## What to reuse from v1
 
