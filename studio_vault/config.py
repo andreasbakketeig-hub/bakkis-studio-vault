@@ -74,7 +74,7 @@ class Settings:
     legacy_import_done: bool = False
 
 
-def _normalize(raw: dict) -> Settings:
+def normalize_settings(raw: dict) -> Settings:
     defaults = Settings()
     values: dict = {}
     for f in fields(Settings):
@@ -94,7 +94,7 @@ def load_settings() -> Settings:
         raw = json.loads(settings_path().read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return Settings()
-    return _normalize(raw if isinstance(raw, dict) else {})
+    return normalize_settings(raw if isinstance(raw, dict) else {})
 
 
 def save_settings(settings: Settings) -> None:

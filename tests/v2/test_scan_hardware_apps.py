@@ -73,6 +73,28 @@ class TestScanHardware:
         midi_names = [d.name for d in result.devices if d.device_type == "MIDI Device"]
         assert midi_names == ["H90 Pedal"]
 
+    def test_usb_host_data_type_fallback(self):
+        host = {"SPUSBHostDataType": [{"_name": "USB 3.1 Bus", "_items": [
+            {"_name": "USB2.0 Hub", "USBDeviceKeyProductID": "0x5801", "_items": [
+                {"_name": "Scarlett 2i2 USB", "USBDeviceKeyProductID": "0x8210",
+                 "USBDeviceKeyVendorID": "0x1235", "USBDeviceKeyVendorName": "Focusrite"},
+                {"_name": "USB2.0 HID", "USBDeviceKeyProductID": "0x1100", "USBDeviceKeyVendorName": "Realtek"},
+            ]},
+        ]}]}
+
+        def profiler(data_type, timeout=60):
+            if data_type == "SPUSBDataType":
+                return {"SPUSBDataType": []}, None
+            if data_type == "SPUSBHostDataType":
+                return host, None
+            return {data_type: []}, None
+
+        with patch.object(sys, "platform", "darwin"), \
+             patch("studio_vault.scanners.hardware.run_system_profiler", side_effect=profiler), \
+             patch("studio_vault.scanners.midi._scan_core_midi", return_value=([], [], [])):
+            result = scan_hardware(debug_log=False)
+        assert [(d.name, d.vendor, d.source) for d in result.devices] == [("Scarlett 2i2 USB", "Focusrite", "USB")]
+
     def test_non_macos(self):
         with patch.object(sys, "platform", "linux"):
             assert scan_hardware(debug_log=False).errors

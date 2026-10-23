@@ -1,6 +1,6 @@
 # BAKKIS STUDIO VAULT v2 — rebuild plan
 
-Status: milestones 1–3 done 2026-10-23 (scanners, vendors, snapshots with v1 import + privacy, compare, new-Mac checklist, HTML/CSV reports; tested on Andreas' Mac: 1,148 plug-ins, 90% of products matched to a vendor). Next: milestone 4 (pywebview app shell). Branch `v2-pywebview` (off `feature/license-vault`).
+Status: milestones 1–4 done 2026-10-23 (scanners, vendors, snapshots, compare, checklist, reports, pywebview app shell with background scan, dialogs and drag-and-drop; run with `.venv/bin/python -m studio_vault`). Next: milestone 5 (full frontend). Branch `v2-pywebview` (off `feature/license-vault`).
 Owner: Andreas (BAKKIS). Communicate with him in Norwegian; code, comments and commits in English.
 
 ## Goal
@@ -75,6 +75,7 @@ hardware) as a **snapshot over time** with a **new-Mac migration checklist**. Th
 8. **README is outdated** (lists modules as "Coming soon" that exist), no LICENSE, no packaging script, `.gitignore` ignores every `*.csv`.
 9. **`main` is behind**: all work since "Cleanup Recommendation Actionability Layer" lives on `feature/license-vault`. Stale branch `cursor/format-analysis-view` is already merged.
 10. **Core MIDI fallback in `hardware_scanner.py` segfaults** on this Mac (pointers passed to `CFRelease` without argtypes get truncated). Only hit when `system_profiler SPMIDIDataType` is empty, which it is here. Fixed in v2 by reusing the MIDI scanner's Core MIDI reader; v1 still has the bug.
+11. **USB scan finds nothing on current macOS**: `system_profiler SPUSBDataType` is empty there; devices are under `SPUSBHostDataType` with different keys. v2 falls back to it; v1 still misses USB devices.
 
 ## What to reuse from v1
 
@@ -120,6 +121,8 @@ tests/             pytest: scanners (with recorded system_profiler fixtures), sn
 - Tables of several thousand rows filter as you type (virtualized list or plain DOM with debounced filter).
 
 ## UX design (direction, to agree in chat)
+
+Milestone 5 to-dos noticed while testing the shell: dark window title bar to match the app; format dates in English (the shell uses the system locale, e.g. "23. okt.").
 
 One window, left rail with four items, dark theme like Music Sorter (`-apple-system`, 8 px grid, one accent).
 

@@ -13,6 +13,8 @@ def isolated_data_dir(tmp_path, monkeypatch) -> Path:
     """Point the app's data folder at a temp dir so tests never touch real user data."""
     data = tmp_path / "data"
     monkeypatch.setenv("STUDIO_VAULT_DATA_DIR", str(data))
+    from studio_vault import config
+    monkeypatch.setattr(config, "LEGACY_DATA_DIR", tmp_path / "legacy")
     return data
 
 

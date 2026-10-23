@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BAKKIS STUDIO VAULT</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <nav class="rail">
+    <div class="brand">BAKKIS<span>STUDIO VAULT</span></div>
+    <button class="nav active" data-view="studio">My Studio</button>
+    <button class="nav" data-view="snapshots">Snapshots</button>
+    <button class="nav" data-view="newmac">New Mac</button>
+    <button class="nav" data-view="inventory">Inventory</button>
+    <div class="rail-foot" id="version"></div>
+  </nav>
+
+  <main>
+    <section class="view active" id="view-studio">
+      <header>
+        <h1 id="studio-title">My Studio</h1>
+        <p class="muted" id="studio-sub">Read-only. Nothing on your Mac is changed, and nothing leaves it.</p>
+      </header>
+      <div class="actions">
+        <button class="primary" id="scan-btn">Scan now</button>
+        <button class="ghost hidden" id="cancel-btn">Cancel</button>
+        <span class="muted" id="scan-msg"></span>
+      </div>
+      <div class="cards" id="counts"></div>
+      <div id="changes"></div>
+    </section>
+
+    <section class="view" id="view-snapshots">
+      <header>
+        <h1>Snapshots</h1>
+        <p class="muted">Every saved scan. Export one to move it to another Mac, or drop a .studiovault file here.</p>
+      </header>
+      <div class="actions"><button class="ghost" id="import-btn">Import snapshot…</button></div>
+      <div id="snapshot-list"></div>
+    </section>
+
+    <section class="view" id="view-newmac">
+      <header><h1>New Mac</h1><p class="muted">Coming in the next milestone.</p></header>
+    </section>
+
+    <section class="view" id="view-inventory">
+      <header><h1>Inventory</h1><p class="muted">Coming in the next milestone.</p></header>
+    </section>
+  </main>
+
+  <div id="toasts"></div>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -273,6 +273,12 @@ def _scan_usb() -> tuple[list[HardwareDevice], list[str], list[str]]:
         return devices, errors, status
 
     leaves = _usb_leaf_nodes(payload)
+    if not leaves:
+        # Newer macOS leaves SPUSBDataType empty and reports devices under SPUSBHostDataType.
+        host_payload, host_err = run_system_profiler("SPUSBHostDataType", timeout=120)
+        if host_err:
+            errors.append(host_err)
+        leaves = _usb_host_leaf_nodes(host_payload)
     status.append(f"USB: {len(leaves)} leaf device(s)")
 
     for item in leaves:
@@ -451,6 +457,31 @@ def _usb_leaf_nodes(payload: dict[str, Any] | None) -> list[dict[str, Any]]:
 
     if payload:
         walk(payload.get("SPUSBDataType"))
+    return leaves
+
+
+def _usb_host_leaf_nodes(payload: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """Leaf devices from SPUSBHostDataType, mapped to the SPUSBDataType keys used above."""
+    leaves: list[dict[str, Any]] = []
+
+    def walk(node: Any) -> None:
+        if isinstance(node, list):
+            for child in node:
+                walk(child)
+        elif isinstance(node, dict):
+            items = node.get("_items")
+            if items:
+                walk(items)
+            elif node.get("_name") and node.get("USBDeviceKeyProductID"):
+                leaves.append({
+                    **node,
+                    "product_id": node.get("USBDeviceKeyProductID"),
+                    "vendor_id": node.get("USBDeviceKeyVendorID"),
+                    "manufacturer": node.get("USBDeviceKeyVendorName", ""),
+                })
+
+    if payload:
+        walk(payload.get("SPUSBHostDataType"))
     return leaves
 
 
