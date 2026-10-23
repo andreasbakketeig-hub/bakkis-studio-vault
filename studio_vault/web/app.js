@@ -13,7 +13,7 @@ const ui = {
   snapshots: [],
   changeFilter: "all",
   studioChanges: null,
-  newmac: { sourceId: "", data: null, filter: "missing", q: "", open: new Set() },
+  newmac: { mode: "new", sourceId: "", data: null, filter: "missing", q: "", open: new Set(), leave: null },
   cmp: { a: "", b: "", data: null, filter: "diff", q: "", open: new Set() },
   inv: { id: "", data: null, tab: "plugins", q: "", fmt: "", kind: "", vendor: "", arch: "", sort: "name", dir: 1 },
   about: null,
@@ -518,8 +518,21 @@ function defaultSource() {
   return other ? other.id : (ui.snapshots[0] ? ui.snapshots[0].id : "");
 }
 
+function modeSwitch() {
+  const nm = ui.newmac;
+  return el("div", { class: "chips", role: "group", "aria-label": "Which Mac are you on", style: "margin-top: 20px" },
+    [["new", "On the new Mac"], ["leave", "Before you leave the old Mac"]].map(([k, label]) =>
+      el("button", { class: `chip${nm.mode === k ? " on" : ""}`, "aria-pressed": String(nm.mode === k),
+                     onclick: () => { nm.mode = k; loadNewMac(); } }, label)));
+}
+
 async function loadNewMac() {
   const nm = ui.newmac;
+  if (nm.mode === "leave") {
+    const res = await api().leave_list();
+    nm.leave = res.ok ? res.leave : null;
+    return renderLeave();
+  }
   if (!nm.sourceId || !ui.snapshots.some((s) => s.id === nm.sourceId)) nm.sourceId = defaultSource();
   if (!nm.sourceId) { nm.data = null; return renderNewMac(); }
   const res = await call("checklist", nm.sourceId);
@@ -572,7 +585,7 @@ function renderNewMac() {
       scanButton()) : null);
 
   if (!c) {
-    root.replaceChildren(head, el("div", { class: "empty", style: "margin-top: 28px" },
+    root.replaceChildren(head, modeSwitch(), el("div", { class: "empty", style: "margin-top: 28px" },
       el("p", { style: "margin: 0 0 16px" }, "No snapshot to work from yet. On the old Mac: scan, then export the snapshot. On this Mac: import it here."),
       el("button", { class: "btn primary", onclick: importSnapshot }, "Import snapshot…")));
     return;
@@ -604,7 +617,7 @@ function renderNewMac() {
                     oninput: (e) => { nm.q = e.target.value; renderGroupsOnly(); } })));
 
   const groupsBox = el("div", { id: "nm-groups" });
-  root.replaceChildren(head, source, toolbar, groupsBox);
+  root.replaceChildren(head, modeSwitch(), source, toolbar, groupsBox);
   renderGroupsOnly();
 
   function renderGroupsOnly() {
@@ -652,6 +665,51 @@ function renderNewMac() {
     if (!cards.length) cards.push(el("div", { class: "empty" }, nm.filter === "missing" && !q ? "Everything is back. Nice." : "Nothing matches."));
     box.replaceChildren(...cards);
   }
+}
+
+function renderLeave() {
+  const root = $("#view-newmac");
+  const L = ui.newmac.leave;
+  const head = el("div", { class: "head" },
+    el("div", {}, el("h1", {}, "New Mac"), el("p", { class: "sub" }, "Do this on the Mac you are leaving, before you wipe or sell it.")),
+    el("div", { class: "actions" }, scanButton()));
+  if (!L) {
+    root.replaceChildren(head, modeSwitch(), el("div", { class: "empty", style: "margin-top: 28px" }, "Scan this Mac first."));
+    return;
+  }
+  const row = (i, extra = []) => {
+    const id = `lv-${i.id}`;
+    return el("div", { class: "item", style: "align-items: flex-start" },
+      el("input", { type: "checkbox", id, checked: i.done, style: "margin-top: 2px",
+                    onchange: async (e) => { const r = await call("leave_tick", i.id, e.target.checked); if (r.ok) { ui.newmac.leave = r.leave; renderLeave(); } } }),
+      el("label", { for: id, class: "name" }, el("b", {}, i.title), i.detail ? el("span", { class: "soft", style: "display: block; font-size: var(--fs-s)" }, i.detail) : null,
+        i.products.length ? el("span", { class: "muted", style: "display: block; font-size: var(--fs-s); margin-top: 4px" },
+          i.products.slice(0, 8).join(", ") + (i.products.length > 8 ? ` and ${num(i.products.length - 8)} more` : "")) : null),
+      extra);
+  };
+  const all = [...L.snapshot, ...L.licenses, ...L.finish];
+  const done = all.filter((i) => i.done).length;
+  const parts = [head, modeSwitch(),
+    el("div", { class: "card source" },
+      el("div", { class: "source-row" },
+        el("div", {}, el("b", {}, "This Mac"), el("div", { class: "muted", style: "font-size: var(--fs-s)" },
+          `Last scan ${fmtWhen(L.snapshot_created_at)}`)),
+        el("div", { class: "big" }, num(done), el("span", {}, ` of ${num(all.length)} done`))),
+      L.snapshot_is_fresh ? null : el("p", { class: "warn-note", style: "margin: 12px 0 0" }, "That scan is more than a day old. Scan again right before you move.")),
+    el("section", { class: "card group", style: "margin-top: 16px" },
+      el("div", { class: "group-head" }, el("h2", {}, "1 · Snapshot")),
+      row(L.snapshot[0], [el("button", { class: "btn small", onclick: () => exportSnapshot(L.export_id) }, "Export…")])),
+    el("section", { class: "card group" },
+      el("div", { class: "group-head" }, el("h2", {}, "2 · Licenses tied to this Mac"),
+        el("span", { class: "muted", style: "font-size: var(--fs-s)" }, plural(L.licenses.length, "vendor"))),
+      L.licenses.length ? L.licenses.map((i) => row(i, i.url ? [el("button", { class: "link", onclick: () => call("open_url", i.url) }, "Vendor ↗")] : []))
+        : el("p", { class: "muted", style: "margin: 8px 0 0" }, "Nothing found that is known to be tied to this computer."),
+      el("p", { class: "muted", style: "margin: 12px 0 0; font-size: var(--fs-s)" },
+        "Most other vendors use an account: you just sign in on the new Mac. Some limit how many computers can be active at once; if you hit that limit, deactivate this Mac in their app or on their website.")),
+    el("section", { class: "card group" },
+      el("div", { class: "group-head" }, el("h2", {}, "3 · Move to the new Mac")),
+      L.finish.map((i) => row(i)))];
+  root.replaceChildren(...parts);
 }
 
 async function exportChecklist() {

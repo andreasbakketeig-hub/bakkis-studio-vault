@@ -32,14 +32,21 @@ class Vendor:
     manager_hints: tuple[str, ...]        # substrings of installed app names
     license_system: str
     download_url: str
+    deactivate: str = ""                  # what to do on the old Mac before leaving it ("" = nothing)
 
     @property
     def website_only(self) -> bool:
         return not self.manager_app
 
 
-def _v(key, name, patterns, prefixes, manager, hints, license_system, url) -> Vendor:
-    return Vendor(key, name, tuple(patterns), tuple(prefixes), manager, tuple(hints), license_system, url)
+def _v(key, name, patterns, prefixes, manager, hints, license_system, url, deactivate="") -> Vendor:
+    if not deactivate and license_system == LICENSE_ILOK:
+        deactivate = ILOK_DEACTIVATE
+    return Vendor(key, name, tuple(patterns), tuple(prefixes), manager, tuple(hints), license_system, url, deactivate)
+
+
+ILOK_DEACTIVATE = ("If these licenses are activated on this computer (not on an iLok USB key or in iLok Cloud), "
+                   "deactivate them in iLok License Manager so you can activate them on the new Mac.")
 
 
 VENDORS: tuple[Vendor, ...] = (
@@ -48,7 +55,9 @@ VENDORS: tuple[Vendor, ...] = (
     _v("izotope", "iZotope", ["izotope"], ["com.izotope."],
        "Native Access", ["native access", "izotope product portal"], LICENSE_ACCOUNT, "https://www.izotope.com/"),
     _v("waves", "Waves", ["waves audio", "wavesaudio", "waves"], ["com.waves.", "com.wavesaudio."],
-       "Waves Central", ["waves central"], LICENSE_ACCOUNT, "https://www.waves.com/downloads/central"),
+       "Waves Central", ["waves central"], LICENSE_ACCOUNT, "https://www.waves.com/downloads/central",
+       "Move your licenses off this Mac in Waves Central (Licenses: to the cloud or a USB drive) "
+       "so you can activate them on the new Mac."),
     _v("arturia", "Arturia", ["arturia"], ["com.arturia."],
        "Arturia Software Center", ["arturia software center"], LICENSE_ACCOUNT, "https://www.arturia.com/support/downloads-manuals"),
     _v("plugin_alliance", "Plugin Alliance", ["plugin alliance", "brainworx"], ["com.plugin-alliance.", "com.brainworx."],
@@ -67,7 +76,9 @@ VENDORS: tuple[Vendor, ...] = (
        "Loopcloud", ["loopcloud"], LICENSE_ACCOUNT, "https://www.loopcloud.com/"),
     _v("steinberg", "Steinberg", ["steinberg"], ["com.steinberg."],
        "Steinberg Download Assistant", ["steinberg download assistant", "steinberg activation manager"],
-       LICENSE_ACCOUNT, "https://www.steinberg.net/"),
+       LICENSE_ACCOUNT, "https://www.steinberg.net/",
+       "Steinberg licenses can be active on a limited number of computers: deactivate this one in "
+       "Steinberg Activation Manager if you will stop using it."),
     _v("soundtoys", "Soundtoys", ["soundtoys"], ["com.soundtoys."],
        "", [], LICENSE_ILOK, "https://www.soundtoys.com/"),
     _v("avid", "Avid", ["avid technology", "avid"], ["com.avid."],

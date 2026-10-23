@@ -390,3 +390,15 @@ def test_intel_only_products_and_summary(vault, scanners):
     assert products["Mixed"]["min_macos"] == "11.0"
     cur = vault.state()["current"]
     assert cur["intel_files"] == 3 and cur["intel_products"] == 2
+
+
+def test_leave_list_api(vault, scanners):
+    assert vault.leave_list()["ok"] is False                 # nothing scanned yet
+    scanners["plugins"].append(Plugin("H-Delay", "AU", "/Library/x/H-Delay.component", "15", "Waves Audio Ltd."))
+    run_scan(vault)
+    res = vault.leave_list()["leave"]
+    assert [i["title"] for i in res["licenses"]] == ["Waves"]
+    assert res["export_id"] == "current"
+    res = vault.leave_tick("license:waves", True)["leave"]
+    assert res["licenses"][0]["done"] is True
+    json.dumps(res)

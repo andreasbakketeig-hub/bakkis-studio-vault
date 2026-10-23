@@ -59,7 +59,7 @@ Then open the app again.
 
 ### Moving to a new Mac
 
-1. On the **old Mac**: scan, go to **Snapshots** and choose **Export…**. You get one `.studiovault` file.
+1. On the **old Mac**: open **New Mac → Before you leave the old Mac**. It lists what to do there first: scan and export the snapshot (one `.studiovault` file), and deactivate licenses that are tied to that computer (Waves, iLok activations, Steinberg).
 2. Copy that file to the **new Mac** (AirDrop, iCloud Drive or a USB stick).
 3. On the new Mac: open the app and choose **Import from another Mac…**, or drag the file into the window.
 4. Open **New Mac**. Everything from the old Mac is listed per vendor with what to do: *Open Native Access, sign in and install the missing items*, *Activate in iLok License Manager*, and so on.
@@ -75,7 +75,7 @@ Hardware is on the list too: connect each device and install its driver; it tick
 |---|---|
 | **My Studio** | Counts of plug-ins (per product and format), music apps, hardware and vendors, and what changed since the last snapshot. |
 | **Compare** | Two Macs (or two snapshots of one Mac) side by side, grouped by vendor: what is only on A, only on B, or installed in a different version or with other formats. |
-| **New Mac** | The checklist built from a snapshot of another Mac. Filter by missing or done, search, tick, print or export. |
+| **New Mac** | *On the new Mac*: the checklist built from a snapshot of the old Mac. Filter by missing or done, search, tick, print or export. *Before you leave the old Mac*: export the snapshot and deactivate licenses tied to that computer. |
 | **Inventory** | Every plug-in (one row per product, all formats together), app and device. Filter by type (instrument, effect, MIDI), vendor and format; show in Finder; copy the path; export as CSV. |
 | **Snapshots** | Every saved scan of this Mac and the ones you imported from other Macs. Rename, export, compare with this Mac, or move to Trash. |
 

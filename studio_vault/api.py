@@ -25,7 +25,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Callable, Protocol
 
-from studio_vault import APP_NAME, __version__, checklist, config, report
+from studio_vault import APP_NAME, __version__, checklist, config, leave, report
 from studio_vault import snapshot as snap
 from studio_vault.compare import compare, compare_versions, side_by_side
 from studio_vault.scanners.apps import scan_music_apps
@@ -468,6 +468,21 @@ class Api:
     def checklist_tick(self, source_id: str, item_id: str, done: bool) -> dict:
         checklist.set_done(source_id, item_id, bool(done))
         return self.checklist(source_id)
+
+    def leave_list(self) -> dict:
+        """'Before you leave this Mac' for this Mac's last scan or snapshot."""
+        def run() -> dict:
+            this_mac = self._this_mac_state()
+            if this_mac.id == "empty":
+                raise ApiError("Scan this Mac first.")
+            built = leave.build(this_mac)
+            return _ok(leave={**{k: v for k, v in asdict(built).items()},
+                              "export_id": "current" if self._current is not None else this_mac.id})
+        return self._guard(run)
+
+    def leave_tick(self, item_id: str, done: bool) -> dict:
+        checklist.set_done(leave.LEAVE_ID, item_id, bool(done))
+        return self.leave_list()
 
     def export_checklist(self, source_id: str, fmt: str = "html") -> dict:
         def run() -> dict:
