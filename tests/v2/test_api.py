@@ -362,3 +362,15 @@ def test_product_kind_vendor_url_and_copy_path(vault, native, scanners):
     assert native.copied[0].endswith("/Library/Audio/Plug-Ins/VST3/Serum.vst3")
     assert not native.copied[0].startswith("~")
     assert vault.copy_path("")["ok"] is False
+
+
+def test_side_by_side_api(vault, scanners):
+    run_scan(vault)
+    sid = vault.snapshots()["snapshots"][0]["id"]
+    scanners["plugins"].pop()                  # Pro-Q 3 gone on "this Mac"
+    run_scan(vault)
+    res = vault.side_by_side(sid, "current")["compare"]
+    assert res["counts"]["only_a"] == 1
+    assert res["a"]["id"] == sid
+    json.dumps(res)
+    assert vault.side_by_side("nope", "current")["ok"] is False

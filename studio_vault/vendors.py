@@ -127,6 +127,28 @@ class NamedApp(Protocol):
     name: str
 
 
+OTHER_GROUP_KEY = "other"
+_COMPANY_SUFFIX = re.compile(r"[\s,]+(inc|llc|ltd|gmbh|ab|bv|as|co|corp|limited)\.?$", re.IGNORECASE)
+
+
+def developer_group(developer: str) -> tuple[str, str]:
+    """(group key, display name) for a developer without a registry entry."""
+    name = _COMPANY_SUFFIX.sub("", (developer or "").strip()).strip(" ,.-_")
+    key = re.sub(r"[^a-z0-9]+", "", name.lower())
+    if not key or not re.search(r"[a-z]", key):   # "", "2024", "2004–2025"
+        return OTHER_GROUP_KEY, "Other"
+    return f"dev:{key}", name
+
+
+def vendor_group(developer: str = "", bundle_id: str = "") -> tuple[str, str, Vendor | None]:
+    """(group key, display name, registry entry or None) used to group items by vendor."""
+    vendor = match_vendor(developer, bundle_id)
+    if vendor is not None:
+        return vendor.key, vendor.name, vendor
+    key, name = developer_group(developer)
+    return key, name, None
+
+
 # ── Matching ──────────────────────────────────────────────────────────────────
 
 def _pattern_matches(pattern: str, developer: str) -> bool:

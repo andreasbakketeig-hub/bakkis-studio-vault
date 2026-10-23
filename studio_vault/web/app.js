@@ -13,9 +13,8 @@ const ui = {
   snapshots: [],
   changeFilter: "all",
   studioChanges: null,
-  compareSel: [],         // up to two snapshot ids
-  compareResult: null,
   newmac: { sourceId: "", data: null, filter: "missing", q: "", open: new Set() },
+  cmp: { a: "", b: "", data: null, filter: "diff", q: "", open: new Set() },
   inv: { id: "", data: null, tab: "plugins", q: "", fmt: "", kind: "", vendor: "", sort: "name", dir: 1 },
   about: null,
 };
@@ -153,6 +152,7 @@ document.querySelectorAll(".nav").forEach((b) => b.addEventListener("click", () 
 
 function render() {
   if (ui.view === "studio") renderStudio();
+  else if (ui.view === "compare") loadCompare();
   else if (ui.view === "snapshots") renderSnapshots();
   else if (ui.view === "newmac") loadNewMac();
   else if (ui.view === "inventory") loadInventory();
@@ -323,13 +323,11 @@ function renderSnapshots() {
   const latestMine = mine.length ? mine[0].id : "";
 
   const card = (s) => {
-    const sel = ui.compareSel.includes(s.id);
-    const id = `snap-${s.id}`;
-    return el("div", { class: `snap${sel ? " sel" : ""}` },
-      el("input", { type: "checkbox", id, checked: sel, "aria-label": `Select ${s.name} to compare`, onchange: () => toggleCompare(s.id) }),
-      el("label", { for: id },
+    return el("div", { class: "snap" },
+      el("div", { class: "grow", style: "flex: 1; min-width: 220px" },
         el("div", { class: "title" }, s.name, s.id === latestMine ? el("span", { class: "badge" }, "Latest") : null),
         el("div", { class: "meta" }, `${s.is_this_mac ? "" : "Imported · "}${fmtDate(s.created_at)} · ${plural(s.plugin_count, "plug-in")} · ${plural(s.app_count, "app")} · ${num(s.hardware_count)} hardware`)),
+      thisMacId() && thisMacId() !== s.id ? el("button", { class: "link", onclick: () => openCompare(thisMacId(), s.id) }, "Compare") : null,
       s.is_this_mac ? null : el("button", { class: "link", onclick: () => { ui.newmac.sourceId = s.id; show("newmac"); } }, "Make checklist"),
       el("button", { class: "link", onclick: () => renameSnapshot(s) }, "Rename"),
       el("button", { class: "link", onclick: () => exportSnapshot(s.id) }, "Export…"),
@@ -348,35 +346,7 @@ function renderSnapshots() {
   }
   parts.push(el("div", { class: "dropzone" }, "Drop a .studiovault file anywhere in the window to import it"));
 
-  if (ui.compareSel.length === 2) {
-    const [a, b] = ui.compareSel.map((id) => ui.snapshots.find((s) => s.id === id)).sort((x, y) => (x.created_at < y.created_at ? -1 : 1));
-    const r = ui.compareResult;
-    const n = (k) => r ? groupChanges(r.changes).filter((x) => x.kind === k).length : 0;
-    parts.push(el("div", { class: "card compare" },
-      el("div", { class: "grow" },
-        el("div", { style: "font-weight: 600" }, `Compare ${fmtShort(a.created_at)} → ${fmtShort(b.created_at)}`),
-        el("div", { class: "muted", style: "font-size: var(--fs-s)" }, `${a.name} → ${b.name}`)),
-      r ? el("div", { class: "counts" },
-        el("span", { class: "a" }, `+${n("added")} added`), el("span", { class: "u" }, `${n("updated")} updated`), el("span", { class: "r" }, `${n("removed")} removed`)) : null,
-      el("button", { class: "btn", onclick: () => { ui.compareSel = []; ui.compareResult = null; renderSnapshots(); } }, "Clear")));
-    if (r) parts.push(r.empty ? el("p", { class: "muted" }, "No differences.") : changeList(r.changes));
-  } else if (ui.compareSel.length === 1) {
-    parts.push(el("p", { class: "muted", style: "margin-top: 20px; font-size: var(--fs-s)" }, "Select one more snapshot to compare."));
-  }
   root.replaceChildren(...parts);
-}
-
-async function toggleCompare(id) {
-  const i = ui.compareSel.indexOf(id);
-  if (i >= 0) ui.compareSel.splice(i, 1);
-  else { ui.compareSel.push(id); if (ui.compareSel.length > 2) ui.compareSel.shift(); }
-  ui.compareResult = null;
-  if (ui.compareSel.length === 2) {
-    const [a, b] = ui.compareSel.map((x) => ui.snapshots.find((s) => s.id === x)).sort((x, y) => (x.created_at < y.created_at ? -1 : 1));
-    const res = await call("compare_snapshots", a.id, b.id);
-    if (res.ok) ui.compareResult = res.changes;
-  }
-  renderSnapshots();
 }
 
 async function renameSnapshot(s) {
@@ -396,8 +366,6 @@ async function trashSnapshot(s) {
   if (!ok) return;
   const res = await call("delete_snapshot", s.id);
   if (res.ok) {
-    ui.compareSel = ui.compareSel.filter((x) => x !== s.id);
-    ui.compareResult = null;
     await refresh();
     render();
   }
@@ -412,6 +380,124 @@ async function importSnapshot() {
     render();
   }
   return res;
+}
+
+// ── Compare ──────────────────────────────────────────────────────────────────
+
+function openCompare(a, b) {
+  Object.assign(ui.cmp, { a, b, data: null });
+  show("compare");
+}
+
+function compareOptions() {
+  const opts = [];
+  if (ui.st.current) opts.push(["current", `This Mac — scan ${fmtWhen(ui.st.current.created_at)}`]);
+  const others = [...ui.snapshots].sort((x, y) => (x.is_this_mac === y.is_this_mac ? 0 : x.is_this_mac ? 1 : -1));
+  for (const s of others) opts.push([s.id, `${s.name} — ${fmtDate(s.created_at, false)}`]);
+  return opts;
+}
+
+function defaultCompare() {
+  const a = thisMacId();
+  const other = ui.snapshots.find((s) => !s.is_this_mac);
+  const olderMine = ui.snapshots.filter((s) => s.is_this_mac && s.id !== a)[0];
+  return [a, (other || olderMine || {}).id || ""];
+}
+
+async function loadCompare() {
+  const c = ui.cmp;
+  const valid = (id) => id === "current" ? !!ui.st.current : ui.snapshots.some((s) => s.id === id);
+  if (!valid(c.a) || !valid(c.b)) { [c.a, c.b] = defaultCompare(); c.data = null; }
+  if (c.a && c.b && c.a !== c.b && !c.data) {
+    const res = await call("side_by_side", c.a, c.b);
+    c.data = res.ok ? res.compare : null;
+  }
+  renderCompare();
+}
+
+function renderCompare() {
+  const root = $("#view-compare");
+  const c = ui.cmp;
+  const d = c.data;
+  const head = el("div", { class: "head" },
+    el("div", {}, el("h1", {}, "Compare"), el("p", { class: "sub" }, "Two Macs side by side: what one has that the other lacks, grouped by vendor.")));
+  const opts = compareOptions();
+  if (opts.length < 2) {
+    root.replaceChildren(head, el("div", { class: "empty", style: "margin-top: 28px" },
+      el("p", { style: "margin: 0 0 16px" }, "You need two snapshots: scan this Mac, then import a snapshot from your other Mac (or scan again later to compare over time)."),
+      el("button", { class: "btn primary", onclick: importSnapshot }, "Import snapshot…")));
+    return;
+  }
+  const select = (key, label) => el("label", {}, label, el("select", { class: "select",
+    onchange: (e) => { c[key] = e.target.value; c.data = null; c.open.clear(); loadCompare(); } },
+    opts.map(([v, t]) => el("option", { value: v, selected: c[key] === v }, t))));
+  const swap = el("button", { class: "btn", "aria-label": "Swap A and B", title: "Swap A and B",
+    onclick: () => { [c.a, c.b] = [c.b, c.a]; c.data = null; loadCompare(); } }, "⇄");
+  const parts = [head, el("div", { class: "card", style: "margin-top: 24px" },
+    el("div", { class: "pick" }, select("a", "A"), swap, select("b", "B")))];
+
+  if (c.a === c.b) { parts.push(el("div", { class: "empty", style: "margin-top: 16px" }, "Pick two different snapshots.")); root.replaceChildren(...parts); return; }
+  if (!d) { root.replaceChildren(...parts); return; }
+
+  const nameA = d.a.machine_name || d.a.name, nameB = d.b.machine_name || d.b.name;
+  const sameMac = nameA === nameB;
+  const la = sameMac ? fmtShort(d.a.created_at) : nameA, lb = sameMac ? fmtShort(d.b.created_at) : nameB;
+  const label = { only_a: "Only on A", only_b: "Only on B", different: "Different", same: "Same" };
+  const stat = (key, n, text) => el("button", { class: c.filter === key ? "on" : "", "aria-pressed": String(c.filter === key),
+    onclick: () => { c.filter = key; renderCompare(); } }, el("b", {}, num(n)), el("small", {}, text));
+  const k = d.counts;
+  parts.push(el("div", { class: "cmp-stats" },
+    stat("only_a", k.only_a, `Only on ${la} (A)`), stat("only_b", k.only_b, `Only on ${lb} (B)`),
+    stat("different", k.different, "Different version or formats"), stat("diff", k.only_a + k.only_b + k.different, "All differences")));
+  parts.push(el("div", { class: "toolbar" }, el("span"),
+    el("label", { class: "search" }, searchIcon(), el("span", { class: "sr" }, "Search"),
+      el("input", { type: "search", placeholder: "Search vendors and plug-ins", value: c.q, oninput: (e) => { c.q = e.target.value; renderRows(); } }))));
+  const box = el("div", { id: "cmp-groups" });
+  parts.push(box);
+  root.replaceChildren(...parts);
+  renderRows();
+
+  function keep(r) {
+    if (c.filter === "diff") return r.status !== "same";
+    return r.status === c.filter;
+  }
+  function cell(formats, version) {
+    if (!formats.length && !version) return el("span", { class: "cell none" }, "—");
+    return el("span", { class: "cell" }, [formats.join(" · "), version].filter(Boolean).join("  ·  v"));
+  }
+  function row(r) {
+    const has = (side) => r.category === "hardware" ? (r.status === "same" || r.status === `only_${side}`) : null;
+    const a = r.category === "hardware" ? el("span", { class: `cell${has("a") ? "" : " none"}` }, has("a") ? "✓" : "—") : cell(r.a_formats, r.a_version);
+    const b = r.category === "hardware" ? el("span", { class: `cell${has("b") ? "" : " none"}` }, has("b") ? "✓" : "—") : cell(r.b_formats, r.b_version);
+    return el("div", { class: "cmp-row" },
+      el("span", {}, r.name, r.category === "apps" ? el("span", { class: "muted" }, " · app") : null),
+      a, b, el("span", { class: `st ${r.status}` }, label[r.status]),
+      r.note && r.category !== "hardware" ? el("span", { class: "note" }, r.note) : null);
+  }
+  function renderRows() {
+    const q = c.q.trim().toLowerCase();
+    const hit = (g, r) => !q || r.name.toLowerCase().includes(q) || (g && g.name.toLowerCase().includes(q));
+    const cards = [];
+    const header = () => el("div", { class: "cmp-row head" }, el("span", {}, "Name"), el("span", { class: "cell" }, `A · ${la}`), el("span", { class: "cell" }, `B · ${lb}`), el("span"));
+    for (const g of d.groups) {
+      const rows = g.rows.filter((r) => keep(r) && hit(g, r));
+      if (!rows.length) continue;
+      const open = c.open.has(g.key) || q;
+      const visible = open ? rows : rows.slice(0, 6);
+      cards.push(el("section", { class: "card group" },
+        el("div", { class: "group-head" }, el("h2", {}, g.name),
+          el("span", { style: "display: flex; gap: 12px; align-items: baseline" },
+            g.download_url ? el("button", { class: "pill", style: "background: none", onclick: () => call("open_url", g.download_url) }, "Download page ↗") : null,
+            el("span", { class: "muted", style: "font-size: var(--fs-s)" }, plural(rows.length, "item")))),
+        header(), visible.map(row),
+        rows.length > visible.length ? el("div", { style: "padding-top: 8px; border-top: 1px solid var(--line)" },
+          el("button", { class: "link", onclick: () => { c.open.add(g.key); renderRows(); } }, `Show ${num(rows.length - visible.length)} more`)) : null));
+    }
+    const hw = d.hardware.filter((r) => keep(r) && hit(null, r));
+    if (hw.length) cards.push(el("section", { class: "card group" }, el("div", { class: "group-head" }, el("h2", {}, "Hardware")), header(), hw.map(row)));
+    if (!cards.length) cards.push(el("div", { class: "empty" }, q ? "Nothing matches." : (c.filter === "diff" ? "No differences. These two are in sync." : "None.")));
+    $("#cmp-groups").replaceChildren(...cards);
+  }
 }
 
 // ── New Mac ──────────────────────────────────────────────────────────────────
@@ -806,6 +892,7 @@ window.vault = {
         await refresh();
         await loadStudioChanges();
         ui.inv.data = null;
+        ui.cmp.data = null;
         if (ui.inv.id !== "current") ui.inv.id = "";
         render();
         const ch = ui.studioChanges;
@@ -824,6 +911,7 @@ window.vault = {
       }
     } else if (event === "snapshots") {
       await refresh();
+      ui.cmp.data = null;
       $("#welcome").classList.add("hidden");
       render();
     } else if (event === "toast") {
@@ -834,9 +922,9 @@ window.vault = {
 
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && !$("#drawer").classList.contains("hidden")) closeSettings();
-  if (e.metaKey && ["1", "2", "3", "4"].includes(e.key)) {
+  if (e.metaKey && ["1", "2", "3", "4", "5"].includes(e.key)) {
     e.preventDefault();
-    show(["studio", "snapshots", "newmac", "inventory"][Number(e.key) - 1]);
+    show(["studio", "compare", "newmac", "inventory", "snapshots"][Number(e.key) - 1]);
   }
 });
 // Stop the web view from opening dropped files itself; Python imports snapshot drops.

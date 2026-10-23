@@ -82,3 +82,41 @@ def test_counts():
     assert counts[CAT_PLUGINS] == {ADDED: 1, REMOVED: 1, UPDATED: 0}
     assert counts[CAT_HARDWARE][ADDED] == 1
     assert counts[CAT_APPS] == {ADDED: 0, REMOVED: 0, UPDATED: 0}
+
+
+# ── side by side ──────────────────────────────────────────────────────────────
+
+from studio_vault.compare import DIFFERENT, ONLY_A, ONLY_B, SAME, side_by_side  # noqa: E402
+
+
+def _rows(r):
+    return {row.name: row for g in r.groups for row in g.rows}
+
+
+def test_side_by_side_product_level():
+    studio = _snap([SnapPlugin("Serum", "VST3", "Xfer Records", "1.36"), SnapPlugin("Serum", "AU", "Xfer Records", "1.36"),
+                    SnapPlugin("Pro-Q 3", "AU", "FabFilter", "3.24"), SnapPlugin("Diva", "AU", "u-he", "1.4")],
+                   apps=[SnapApp("Ableton Live 12 Suite", developer="Ableton", version="12.1")],
+                   hardware=[SnapHardware("BiG SiX", "SSL")])
+    laptop = _snap([SnapPlugin("Serum VST3", "VST3", "Xfer Records", "1.36"),
+                    SnapPlugin("Pro-Q 3", "AU", "FabFilter", "3.26"), SnapPlugin("Tour Synth", "AU", "Indie", "1.0")],
+                   apps=[SnapApp("Ableton Live 12 Suite", developer="Ableton", version="12.1")],
+                   hardware=[SnapHardware("Big Six", "SSL"), SnapHardware("MiniFuse", "Arturia")])
+    r = side_by_side(studio, laptop)
+    rows = _rows(r)
+    assert rows["Diva"].status == ONLY_A
+    assert rows["Tour Synth"].status == ONLY_B
+    assert rows["Serum"].status == DIFFERENT and rows["Serum"].note == "only A has AU"
+    assert rows["Pro-Q 3"].status == DIFFERENT and "3.24 vs 3.26" in rows["Pro-Q 3"].note
+    assert rows["Ableton Live 12 Suite"].status == SAME
+    assert {h.name: h.status for h in r.hardware} == {"BiG SiX": SAME, "MiniFuse": ONLY_B}
+    assert r.counts() == {ONLY_A: 1, ONLY_B: 2, DIFFERENT: 2, SAME: 2}
+    fab = next(g for g in r.groups if g.key == "fabfilter")
+    assert fab.name == "FabFilter" and fab.download_url.startswith("https://")
+
+
+def test_side_by_side_orders_differences_first():
+    a = _snap([SnapPlugin("A1", "AU", "Acme"), SnapPlugin("A2", "AU", "Acme")])
+    b = _snap([SnapPlugin("A2", "AU", "Acme")])
+    [g] = side_by_side(a, b).groups
+    assert [r.status for r in g.rows] == [ONLY_A, SAME]

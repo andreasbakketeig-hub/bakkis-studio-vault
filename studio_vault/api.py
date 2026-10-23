@@ -27,7 +27,7 @@ from typing import Any, Callable, Protocol
 
 from studio_vault import APP_NAME, __version__, checklist, config, report
 from studio_vault import snapshot as snap
-from studio_vault.compare import compare
+from studio_vault.compare import compare, side_by_side
 from studio_vault.scanners.apps import scan_music_apps
 from studio_vault.scanners.hardware import scan_hardware
 from studio_vault.scanners.plugins import FORMAT_ORDER, SCAN_PATHS, SizeCache, normalize_product_name, scan_plugins
@@ -357,6 +357,20 @@ class Api:
 
     def compare_snapshots(self, old_id: str, new_id: str) -> dict:
         return self._guard(lambda: _ok(changes=self._changes_dict(self._load(old_id), self._load(new_id))))
+
+    def side_by_side(self, a_id: str, b_id: str) -> dict:
+        """Two Macs (or two snapshots) side by side, per product, grouped by vendor."""
+        def run() -> dict:
+            a, b = self._load(a_id), self._load(b_id)
+            r = side_by_side(a, b)
+            label = lambda s: {"id": s.id, "name": s.name, "machine_name": s.machine_name, "created_at": s.created_at}
+            return _ok(compare={
+                "a": label(a), "b": label(b), "counts": r.counts(),
+                "groups": [{"key": g.key, "name": g.name, "download_url": g.download_url,
+                            "rows": [asdict(x) for x in g.rows]} for g in r.groups],
+                "hardware": [asdict(x) for x in r.hardware],
+            })
+        return self._guard(run)
 
     def rename_snapshot(self, snapshot_id: str, name: str) -> dict:
         def run() -> dict:

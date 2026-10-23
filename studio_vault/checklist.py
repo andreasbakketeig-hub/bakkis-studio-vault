@@ -29,6 +29,8 @@ from studio_vault.vendors import (
     LICENSE_SERIAL,
     LICENSE_UNKNOWN,
     Vendor,
+    OTHER_GROUP_KEY,
+    developer_group,
     installed_manager,
     match_vendor,
 )
@@ -41,7 +43,6 @@ STATUS_INSTALLED = "installed"
 STATUS_PARTIAL = "partial"
 STATUS_MISSING = "missing"
 
-OTHER_GROUP_KEY = "other"
 
 
 @dataclass
@@ -131,18 +132,6 @@ def next_step(group: VendorGroup) -> str:
 
 # ── Grouping helpers ──────────────────────────────────────────────────────────
 
-_COMPANY_SUFFIX = re.compile(r"[\s,]+(inc|llc|ltd|gmbh|ab|bv|as|co|corp|limited)\.?$", re.IGNORECASE)
-
-
-def _developer_key(developer: str) -> tuple[str, str]:
-    """(group key, display name) for a developer without a registry entry."""
-    name = _COMPANY_SUFFIX.sub("", (developer or "").strip()).strip(" ,.-_")
-    key = re.sub(r"[^a-z0-9]+", "", name.lower())
-    if not key or not re.search(r"[a-z]", key):   # "", "2024", "2004–2025"
-        return OTHER_GROUP_KEY, "Other"
-    return f"dev:{key}", name
-
-
 def _item_id(kind: str, name: str) -> str:
     return f"{kind}:{re.sub(r'[^a-z0-9]+', '', name.lower())}"
 
@@ -169,7 +158,7 @@ def build(source: Snapshot, current: Snapshot, manual_done: set[str] | None = No
                     license_system=vendor.license_system, download_url=vendor.download_url,
                 )
             return groups[key]
-        key, name = _developer_key(developer)
+        key, name = developer_group(developer)
         if key not in groups:
             groups[key] = VendorGroup(key=key, name=name)
         return groups[key]

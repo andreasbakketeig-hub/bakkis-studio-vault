@@ -9,7 +9,7 @@ Made by [BAKKIS](https://bakkis.com), DJ and producer from Norway.
 - Finds AU, VST3, CLAP, VST and AAX plug-ins, your DAWs and installer apps, audio interfaces and MIDI gear
 - Shows what changed since your last snapshot: new plug-ins, updates and anything that disappeared
 - New Mac checklist grouped by vendor, with the installer app (Native Access, Waves Central, UA Connect …), the license system (account, iLok, serial) and a download link
-- Compare any two snapshots, for example your studio Mac and your touring laptop
+- Compare two Macs side by side, for example your studio Mac and your touring laptop: what each one lacks, per vendor
 - **Read-only**: it never moves, changes or deletes a plug-in, and nothing leaves your Mac
 
 ---
@@ -73,11 +73,12 @@ Hardware is on the list too: connect each device and install its driver; it tick
 | Screen | What it is for |
 |---|---|
 | **My Studio** | Counts of plug-ins (per product and format), music apps, hardware and vendors, and what changed since the last snapshot. |
-| **Snapshots** | Every saved scan of this Mac and the ones you imported from other Macs. Rename, export, move to Trash, or tick two to compare them. |
+| **Compare** | Two Macs (or two snapshots of one Mac) side by side, grouped by vendor: what is only on A, only on B, or installed in a different version or with other formats. |
 | **New Mac** | The checklist built from a snapshot of another Mac. Filter by missing or done, search, tick, print or export. |
 | **Inventory** | Every plug-in (one row per product, all formats together), app and device. Filter by type (instrument, effect, MIDI), vendor and format; show in Finder; copy the path; export as CSV. |
+| **Snapshots** | Every saved scan of this Mac and the ones you imported from other Macs. Rename, export, compare with this Mac, or move to Trash. |
 
-Press **⌘1–⌘4** to switch screens. Settings (the gear icon) has scanning options, extra plug-in folders, and About.
+Press **⌘1–⌘5** to switch screens. Settings (the gear icon) has scanning options, extra plug-in folders, and About.
 
 ### What it reads
 
