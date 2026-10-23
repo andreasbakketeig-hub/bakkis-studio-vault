@@ -16,7 +16,7 @@ const ui = {
   compareSel: [],         // up to two snapshot ids
   compareResult: null,
   newmac: { sourceId: "", data: null, filter: "missing", q: "", open: new Set() },
-  inv: { id: "", data: null, tab: "plugins", q: "", fmt: "", sort: "name", dir: 1 },
+  inv: { id: "", data: null, tab: "plugins", q: "", fmt: "", kind: "", vendor: "", sort: "name", dir: 1 },
   about: null,
 };
 
@@ -116,7 +116,7 @@ function modal({ title, text, input, confirmLabel = "OK", danger = false, choice
     const field = input !== undefined ? el("input", { type: "text", value: input, "aria-label": title }) : null;
     const buttons = choices
       ? choices.map((c, i) => el("button", { class: `btn${i === choices.length - 1 ? " primary" : ""}`, onclick: () => close(c.value) }, c.label))
-      : [el("button", { class: "btn primary", style: danger ? "background: var(--removed)" : null,
+      : [el("button", { class: "btn primary", style: danger ? "background: var(--danger)" : null,
                         onclick: () => close(field ? field.value : true) }, confirmLabel)];
     const box = el("div", { class: "modal" },
       el("h2", { id: "modal-title" }, title),
@@ -211,11 +211,11 @@ function renderStudio() {
       el("div", { class: "steps" }, order.map((p, i) =>
         el("span", { class: i < at ? "done" : (i === at ? "now" : "") }, `${i < at ? "✓ " : ""}${labels[p]}`))),
       el("div", { class: "meter indeterminate", role: "progressbar", "aria-label": "Scanning" }, el("div")),
-      el("div", { style: "display: flex; justify-content: space-between; margin-top: 10px; font-size: 13px" },
+      el("div", { style: "display: flex; justify-content: space-between; margin-top: 8px; font-size: var(--fs-s)" },
         el("span", { class: "muted" }, scan.message || "Working…"),
         el("button", { class: "link", onclick: () => call("scan_cancel") }, "Cancel"))));
   } else if (scan.error) {
-    parts.push(el("p", { class: "card", style: "margin-top: 24px; color: var(--removed)" }, scan.error));
+    parts.push(el("p", { class: "card", style: "margin-top: 24px; color: var(--danger)" }, scan.error));
   }
 
   if (sum) {
@@ -230,7 +230,7 @@ function renderStudio() {
     const total = sum.plugin_count || 1;
     const present = FORMATS.filter(([f]) => sum.plugin_formats[f]);
     parts.push(el("div", { class: "card formats" },
-      el("div", { style: "display: flex; justify-content: space-between; color: var(--muted); font-size: 12px; margin-bottom: 10px" },
+      el("div", { style: "display: flex; justify-content: space-between; color: var(--muted); font-size: var(--fs-s); margin-bottom: 8px" },
         el("span", {}, "Plug-in formats"), el("span", {}, `${num(sum.plugin_count)} files`)),
       el("div", { class: "bar", role: "img", "aria-label": present.map(([f]) => `${f} ${sum.plugin_formats[f]}`).join(", ") },
         present.map(([f, v]) => el("div", { style: `flex: ${sum.plugin_formats[f] / total}; background: var(${v})` }))),
@@ -253,7 +253,7 @@ function renderStudio() {
       ? el("p", { class: "muted", style: "margin-top: 12px" }, "Nothing changed.")
       : changeList(ch.changes.filter((x) => ui.changeFilter === "all" || x.kind === ui.changeFilter)));
   } else if (st.current && !running) {
-    parts.push(el("div", { class: "empty", style: "margin-top: 36px" },
+    parts.push(el("div", { class: "empty", style: "margin-top: 40px" },
       "This is the first snapshot of this Mac. Next time you scan, what changed shows up here."));
   } else if (!sum && !running) {
     parts.push(el("div", { class: "empty", style: "margin-top: 28px" }, "Scan this Mac to see your plug-ins, music apps and hardware."));
@@ -292,7 +292,7 @@ function changeList(changes, limit = 300) {
       el("span", { class: "name" }, c.name, c.vendor ? el("span", { class: "muted" }, ` · ${c.vendor}`) : null),
       el("span", { class: "muted" }, detail || ""));
   }));
-  if (changes.length > limit) box.append(el("p", { class: "muted", style: "font-size: 13px" }, `And ${num(changes.length - limit)} more.`));
+  if (changes.length > limit) box.append(el("p", { class: "muted", style: "font-size: var(--fs-s)" }, `And ${num(changes.length - limit)} more.`));
   if (!changes.length) box.append(el("p", { class: "muted" }, "None."));
   return box;
 }
@@ -355,13 +355,13 @@ function renderSnapshots() {
     parts.push(el("div", { class: "card compare" },
       el("div", { class: "grow" },
         el("div", { style: "font-weight: 600" }, `Compare ${fmtShort(a.created_at)} → ${fmtShort(b.created_at)}`),
-        el("div", { class: "muted", style: "font-size: 13px" }, `${a.name} → ${b.name}`)),
+        el("div", { class: "muted", style: "font-size: var(--fs-s)" }, `${a.name} → ${b.name}`)),
       r ? el("div", { class: "counts" },
         el("span", { class: "a" }, `+${n("added")} added`), el("span", { class: "u" }, `${n("updated")} updated`), el("span", { class: "r" }, `${n("removed")} removed`)) : null,
       el("button", { class: "btn", onclick: () => { ui.compareSel = []; ui.compareResult = null; renderSnapshots(); } }, "Clear")));
     if (r) parts.push(r.empty ? el("p", { class: "muted" }, "No differences.") : changeList(r.changes));
   } else if (ui.compareSel.length === 1) {
-    parts.push(el("p", { class: "muted", style: "margin-top: 20px; font-size: 13px" }, "Select one more snapshot to compare."));
+    parts.push(el("p", { class: "muted", style: "margin-top: 20px; font-size: var(--fs-s)" }, "Select one more snapshot to compare."));
   }
   root.replaceChildren(...parts);
 }
@@ -475,7 +475,7 @@ function renderNewMac() {
 
   if (!c) {
     root.replaceChildren(head, el("div", { class: "empty", style: "margin-top: 28px" },
-      el("p", { style: "margin: 0 0 14px" }, "No snapshot to work from yet. On the old Mac: scan, then export the snapshot. On this Mac: import it here."),
+      el("p", { style: "margin: 0 0 16px" }, "No snapshot to work from yet. On the old Mac: scan, then export the snapshot. On this Mac: import it here."),
       el("button", { class: "btn primary", onclick: importSnapshot }, "Import snapshot…")));
     return;
   }
@@ -488,7 +488,7 @@ function renderNewMac() {
     el("div", { class: "source-row" },
       el("label", {}, "From snapshot", select),
       el("div", { class: "big" }, num(c.done_count), el("span", {}, ` of ${num(c.total)} done`))),
-    el("div", { class: "meter", style: "margin-top: 14px; height: 8px", role: "progressbar", "aria-valuenow": pct, "aria-valuemin": 0, "aria-valuemax": 100, "aria-label": "Checklist progress" },
+    el("div", { class: "meter", style: "margin-top: 16px; height: 8px", role: "progressbar", "aria-valuenow": pct, "aria-valuemin": 0, "aria-valuemax": 100, "aria-label": "Checklist progress" },
       el("div", { style: `width: ${pct}%` })));
 
   const all = [...c.groups.flatMap((g) => g.items), ...c.hardware];
@@ -531,7 +531,7 @@ function renderNewMac() {
       const expanded = nm.open.has(g.key) || q;
       const visible = expanded ? items : items.slice(0, 4);
       cards.push(el("section", { class: "card group" },
-        el("div", { class: "group-head" }, el("h2", {}, g.name), el("span", { class: "muted", style: "font-size: 13px" }, `${num(g.done_count)} of ${num(g.items.length)} done`)),
+        el("div", { class: "group-head" }, el("h2", {}, g.name), el("span", { class: "muted", style: "font-size: var(--fs-s)" }, `${num(g.done_count)} of ${num(g.items.length)} done`)),
         facts.childElementCount ? facts : null,
         el("p", { class: "step" }, g.next_step),
         el("div", {}, visible.map(itemRow),
@@ -542,7 +542,7 @@ function renderNewMac() {
     if (hw.length) {
       const connected = c.hardware.filter((i) => i.done).length;
       cards.push(el("section", { class: "card group" },
-        el("div", { class: "group-head" }, el("h2", {}, "Hardware"), el("span", { class: "muted", style: "font-size: 13px" }, `${connected} of ${c.hardware.length} connected`)),
+        el("div", { class: "group-head" }, el("h2", {}, "Hardware"), el("span", { class: "muted", style: "font-size: var(--fs-s)" }, `${connected} of ${c.hardware.length} connected`)),
         el("p", { class: "step" }, "Connect each device and install its driver or control app."),
         el("div", {}, hw.map(itemRow))));
     }
@@ -597,28 +597,47 @@ function renderInventory() {
   const tabs = el("div", { class: "tabs", role: "tablist", "aria-label": "Inventory" },
     [["plugins", "Plug-ins", d.products.length], ["apps", "Apps", d.apps.length], ["hardware", "Hardware", d.hardware.length]].map(([k, label, n]) =>
       el("button", { class: `tab${inv.tab === k ? " on" : ""}`, role: "tab", "aria-selected": String(inv.tab === k),
-                     onclick: () => { inv.tab = k; inv.q = ""; inv.fmt = ""; inv.sort = "name"; inv.dir = 1; renderInventory(); } },
+                     onclick: () => { Object.assign(inv, { tab: k, q: "", fmt: "", kind: "", vendor: "", sort: "name", dir: 1 }); renderInventory(); } },
         `${label} `, el("span", { class: "muted", style: "font-weight: 400" }, num(n)))));
 
-  const fmts = inv.tab === "plugins" ? el("div", { class: "chips", role: "group", "aria-label": "Format" },
-    ["", "VST3", "AU", "CLAP", "VST", "AAX"].map((f) => el("button", { class: `chip${inv.fmt === f ? " on" : ""}`, "aria-pressed": String(inv.fmt === f),
-      onclick: () => { inv.fmt = f; renderTable(); renderInventoryChips(); } }, f || "All"))) : null;
+  // Chip groups filter the plug-in table: key is the inv field, values [value, label].
+  const chipGroup = (key, label, values) => el("div", { class: "chips", role: "group", "aria-label": label },
+    values.map(([v, text]) => el("button", { class: `chip${inv[key] === v ? " on" : ""}`, "aria-pressed": String(inv[key] === v),
+      "data-key": key, "data-v": v, onclick: () => { inv[key] = v; renderTable(); syncChips(); } }, text)));
+  const plugins = inv.tab === "plugins";
+  const kinds = new Set(d.products.map((p) => p.kind));
+  const vendors = [...new Set(d.products.map((p) => p.vendor).filter(Boolean))].sort((a, b) => a.localeCompare(b, "en", { sensitivity: "base" }));
 
   const toolbar = el("div", { class: "toolbar", style: "margin-top: 16px" },
     el("label", { class: "search", style: "flex: 1; max-width: 420px" }, searchIcon(), el("span", { class: "sr" }, "Search"),
       el("input", { type: "search", placeholder: "Search name or vendor", value: inv.q, oninput: (e) => { inv.q = e.target.value; renderTable(); } })),
-    fmts);
+    plugins ? el("select", { class: "select", style: "min-width: 220px", "aria-label": "Vendor",
+      onchange: (e) => { inv.vendor = e.target.value; renderTable(); } },
+      el("option", { value: "" }, `All vendors (${num(vendors.length)})`),
+      vendors.map((v) => el("option", { value: v, selected: inv.vendor === v }, v))) : null);
+  const filters = plugins ? el("div", { class: "toolbar", style: "margin-top: 0" },
+    chipGroup("kind", "Type", [["", "All types"], ...[["Instrument", "Instruments"], ["Effect", "Effects"], ["MIDI", "MIDI"]].filter(([k]) => kinds.has(k))]),
+    chipGroup("fmt", "Format", [["", "All formats"], ["VST3", "VST3"], ["AU", "AU"], ["CLAP", "CLAP"], ["VST", "VST"], ["AAX", "AAX"]])) : null;
 
   const tableBox = el("div", { id: "inv-table" });
-  root.replaceChildren(head, tabs, toolbar, tableBox);
+  root.replaceChildren(head, tabs, toolbar, filters || "", tableBox);
   renderTable();
 
-  function renderInventoryChips() {
-    toolbar.querySelectorAll(".chip").forEach((b) => {
-      const on = (b.textContent === "All" ? "" : b.textContent) === inv.fmt;
+  function syncChips() {
+    root.querySelectorAll(".chip[data-key]").forEach((b) => {
+      const on = inv[b.dataset.key] === b.dataset.v;
       b.classList.toggle("on", on);
       b.setAttribute("aria-pressed", String(on));
     });
+  }
+
+  function actions(path) {
+    return el("td", { class: "nw" },
+      el("button", { class: "icon-btn row-btn", "aria-label": "Show in Finder", title: "Show in Finder", onclick: () => call("reveal", path) },
+        svg(["M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"])),
+      el("button", { class: "icon-btn row-btn", "aria-label": "Copy path", title: "Copy path", onclick: async () => {
+        const r = await call("copy_path", path); if (r.ok) toast("Path copied."); } },
+        svg(["M9 9h10v10H9z", "M5 15V5h10"])));
   }
 
   function sortHeader(key, label, cls = "") {
@@ -631,20 +650,24 @@ function renderInventory() {
     const q = inv.q.trim().toLowerCase();
     let rows, header, row;
     if (inv.tab === "plugins") {
-      rows = d.products.filter((p) => (!q || p.name.toLowerCase().includes(q) || (p.vendor || "").toLowerCase().includes(q)) && (!inv.fmt || p.formats.includes(inv.fmt)));
-      header = [sortHeader("name", "Product"), sortHeader("vendor", "Vendor"), el("th", {}, "Formats"), el("th", {}, "Version"), sortHeader("size", "Size", "num"), el("th", {}, el("span", { class: "sr" }, "Actions"))];
+      rows = d.products.filter((p) => (!q || p.name.toLowerCase().includes(q) || (p.vendor || "").toLowerCase().includes(q))
+        && (!inv.fmt || p.formats.includes(inv.fmt)) && (!inv.kind || p.kind === inv.kind) && (!inv.vendor || p.vendor === inv.vendor));
+      header = [sortHeader("name", "Product"), sortHeader("kind", "Type"), sortHeader("vendor", "Vendor"), el("th", {}, "Formats"), el("th", {}, "Version"), sortHeader("size", "Size", "num"), el("th", {}, el("span", { class: "sr" }, "Actions"))];
       row = (p) => el("tr", {},
-        el("td", {}, p.name), el("td", { class: "soft" }, p.vendor || "—"),
+        el("td", {}, p.name), el("td", { class: "soft" }, p.kind || "—"),
+        el("td", {}, p.vendor_url
+          ? el("button", { class: "vendor-link", title: `Open ${p.vendor}'s download page`, onclick: () => call("open_url", p.vendor_url) }, p.vendor, " ↗")
+          : el("span", { class: "soft" }, p.vendor || "—")),
         el("td", { class: "nw" }, p.formats.map((f) => el("span", { class: "f" }, f))),
         el("td", { class: "soft" }, p.version || "—"), el("td", { class: "num soft" }, fmtBytes(p.size)),
-        el("td", { class: "nw" }, el("button", { class: "link", onclick: () => call("reveal", p.path) }, "Show in Finder")));
+        actions(p.path));
     } else if (inv.tab === "apps") {
       rows = d.apps.filter((a) => !q || a.name.toLowerCase().includes(q) || (a.developer || "").toLowerCase().includes(q));
       header = [sortHeader("name", "App"), sortHeader("developer", "Developer"), sortHeader("category", "Category"), el("th", {}, "Version"), el("th", {}, el("span", { class: "sr" }, "Actions"))];
       row = (a) => el("tr", {},
         el("td", {}, a.name), el("td", { class: "soft" }, a.developer || "—"), el("td", { class: "soft" }, a.category || "—"),
         el("td", { class: "soft" }, a.version || "—"),
-        el("td", { class: "nw" }, el("button", { class: "link", onclick: () => call("reveal", a.path) }, "Show in Finder")));
+        actions(a.path));
     } else {
       rows = d.hardware.filter((h) => !q || h.name.toLowerCase().includes(q) || (h.vendor || "").toLowerCase().includes(q));
       header = [sortHeader("name", "Device"), sortHeader("vendor", "Vendor"), sortHeader("device_type", "Type"), el("th", {}, "Connection")];
@@ -661,7 +684,7 @@ function renderInventory() {
     $("#inv-table").replaceChildren(
       rows.length ? el("div", { class: "table-wrap" }, el("table", {}, el("thead", {}, el("tr", {}, header)), el("tbody", {}, rows.map(row))))
         : el("div", { class: "empty" }, total ? "Nothing matches." : `No ${noun} in this snapshot.`),
-      el("p", { class: "muted", style: "margin-top: 12px; font-size: 12px" },
+      el("p", { class: "muted", style: "margin-top: 12px; font-size: var(--fs-s)" },
         `Showing ${num(rows.length)} of ${num(total)} ${noun}${inv.tab === "plugins" ? " · one row per product, all formats together" : ""}`));
   }
 }
@@ -693,30 +716,30 @@ function renderSettings() {
   const a = ui.about;
   const toggle = (key, title, note) => el("label", { class: "set" },
     el("input", { type: "checkbox", checked: s[key], onchange: (e) => setSetting(key, e.target.checked) }),
-    el("span", {}, title, el("br"), el("span", { class: "muted", style: "font-size: 13px" }, note)));
+    el("span", {}, title, el("br"), el("span", { class: "muted", style: "font-size: var(--fs-s)" }, note)));
   const link = (label, url) => el("button", { class: "lk", onclick: () => call("open_url", url) }, el("span", {}, label), el("span", { class: "muted" }, "↗"));
 
   $("#drawer").replaceChildren(
-    el("div", { class: "drawer-head" }, el("h1", { style: "font-size: 20px" }, "Settings"),
+    el("div", { class: "drawer-head" }, el("h1", { style: "font-size: var(--fs-l)" }, "Settings"),
       el("button", { class: "icon-btn", "aria-label": "Close settings", onclick: closeSettings }, svg(["M6 6l12 12", "M18 6L6 18"]))),
     el("div", { class: "label", style: "margin-top: 24px" }, "SCANNING"),
     toggle("scan_on_launch", "Scan when the app opens", "Off by default. The last snapshot shows instantly either way."),
     toggle("auto_save_snapshot", "Save a snapshot when something changed", "Unchanged scans are not saved again."),
     el("div", { class: "set", style: "flex-direction: column; gap: 8px" },
       el("span", {}, "Extra plug-in folders"),
-      s.extra_plugin_folders.length ? null : el("span", { class: "muted", style: "font-size: 13px" }, "The standard macOS plug-in folders are always scanned."),
+      s.extra_plugin_folders.length ? null : el("span", { class: "muted", style: "font-size: var(--fs-s)" }, "The standard macOS plug-in folders are always scanned."),
       s.extra_plugin_folders.map((f) => el("div", { class: "folder" }, el("span", { title: f }, f),
         el("button", { class: "link", onclick: async () => { const r = await call("remove_plugin_folder", f); if (r.ok) { ui.st.settings = r.settings; renderSettings(); } } }, "Remove"))),
       el("button", { class: "btn small", style: "align-self: flex-start", onclick: async () => {
         const r = await call("add_plugin_folder"); if (r.ok && !r.cancelled) { ui.st.settings = r.settings; renderSettings(); } } }, "Add folder…")),
     el("div", { class: "label", style: "margin-top: 28px" }, "ABOUT"),
-    el("p", { style: "margin: 10px 0 14px", class: "soft" }, `${a.app_name} ${a.version} · macOS ${a.macos}`, el("br"),
-      el("span", { class: "muted", style: "font-size: 13px" }, "Free and open source. Made by BAKKIS, DJ and producer from Norway.")),
+    el("p", { style: "margin: 8px 0 16px", class: "soft" }, `${a.app_name} ${a.version} · macOS ${a.macos}`, el("br"),
+      el("span", { class: "muted", style: "font-size: var(--fs-s)" }, "Free and open source. Made by BAKKIS, DJ and producer from Norway.")),
     link("bakkis.com", a.links.website),
     link("Instagram", a.links.instagram),
     link("Listen on Spotify, SoundCloud, Beatport …", a.links.music),
     link("Support on Ko-fi", a.links.support),
-    el("div", { class: "actions", style: "margin-top: 18px; align-items: center" },
+    el("div", { class: "actions", style: "margin-top: 16px; align-items: center" },
       el("button", { class: "btn small", onclick: () => call("open_url", a.report_url) }, "Report a problem"),
       el("button", { class: "link", onclick: () => call("open_url", a.links.contact) }, "bakkis@bakkis.com")));
 }
@@ -727,7 +750,7 @@ function renderWelcome() {
   const point = (paths, bold, rest) => el("div", {}, svg(paths), el("span", {}, el("b", {}, bold), " ", el("span", { class: "soft" }, rest)));
   const w = $("#welcome");
   w.replaceChildren(el("div", { class: "inner" },
-    el("div", { class: "brand", style: "padding: 0; font-size: 15px" }, "BAKKIS", el("span", {}, "STUDIO VAULT")),
+    el("div", { class: "brand", style: "padding: 0; font-size: var(--fs-m)" }, "BAKKIS", el("span", {}, "STUDIO VAULT")),
     el("h1", {}, "Know your studio.", el("br"), "Move it anywhere."),
     el("p", { class: "lead" }, "See every plug-in, music app and piece of gear on this Mac, keep snapshots over time, and get a checklist when you set up a new one."),
     el("div", { class: "points" },
@@ -739,7 +762,7 @@ function renderWelcome() {
       el("button", { class: "btn", onclick: async () => {
         const r = await importSnapshot();
         if (r.ok && !r.cancelled) { w.classList.add("hidden"); show("newmac"); } } }, "Import from another Mac…")),
-    el("p", { class: "muted", style: "margin-top: 16px; font-size: 13px" }, "Moving to a new Mac? Scan the old one first, export the snapshot, then import it here.")));
+    el("p", { class: "muted", style: "margin-top: 16px; font-size: var(--fs-s)" }, "Moving to a new Mac? Scan the old one first, export the snapshot, then import it here.")));
   w.classList.remove("hidden");
   w.querySelector(".btn.primary").focus();
 }

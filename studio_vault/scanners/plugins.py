@@ -29,6 +29,13 @@ PLUGIN_FORMATS: dict[str, str] = {
 
 FORMAT_ORDER: list[str] = ["VST3", "AU", "CLAP", "VST", "AAX"]
 
+KIND_INSTRUMENT = "Instrument"
+KIND_EFFECT = "Effect"
+KIND_MIDI = "MIDI"
+
+# AudioComponents "type" codes (AU, and some other formats that carry the same plist key).
+_AU_TYPE_KIND = {"aumu": KIND_INSTRUMENT, "aufx": KIND_EFFECT, "aumf": KIND_EFFECT, "aumi": KIND_MIDI}
+
 SCAN_PATHS: list[str] = [
     "/Library/Audio/Plug-Ins/VST",
     "/Library/Audio/Plug-Ins/VST3",
@@ -54,6 +61,7 @@ class Plugin:
     bundle_id: str = ""
     file_size: int = 0        # bytes
     modified: str = ""        # ISO date string YYYY-MM-DD
+    kind: str = ""            # KIND_INSTRUMENT | KIND_EFFECT | KIND_MIDI | "" (unknown)
 
 
 @dataclass
@@ -234,7 +242,7 @@ def _read_plugin(bundle: Path, cache: SizeCache) -> Plugin:
 
 def bundle_metadata(bundle: Path) -> dict:
     """Extract version, developer, bundle_id and modified date from a bundle."""
-    meta: dict = {"version": "", "developer": "", "bundle_id": "", "modified": ""}
+    meta: dict = {"version": "", "developer": "", "bundle_id": "", "modified": "", "kind": ""}
 
     try:
         meta["modified"] = datetime.datetime.fromtimestamp(
@@ -257,7 +265,33 @@ def bundle_metadata(bundle: Path) -> dict:
     ).strip()
     meta["bundle_id"] = str(plist.get("CFBundleIdentifier") or "").strip()
     meta["developer"] = _developer_from_plist(plist)
+    meta["kind"] = _kind_from_plist(plist) or _kind_from_vst3_moduleinfo(bundle)
     return meta
+
+
+def _kind_from_plist(plist: dict) -> str:
+    components = plist.get("AudioComponents") or []
+    if components and isinstance(components, list) and isinstance(components[0], dict):
+        return _AU_TYPE_KIND.get(str(components[0].get("type", "")).lower(), "")
+    return ""
+
+
+_SUBCATS = re.compile(r'"Sub Categories"\s*:\s*\[([^\]]*)\]')
+
+
+def _kind_from_vst3_moduleinfo(bundle: Path) -> str:
+    """VST3 bundles may ship Contents/Resources/moduleinfo.json (JSON5-ish: trailing commas)."""
+    path = bundle / "Contents" / "Resources" / "moduleinfo.json"
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+    cats = {c.strip().strip('"').lower() for block in _SUBCATS.findall(text) for c in block.split(",")}
+    if "instrument" in cats:
+        return KIND_INSTRUMENT
+    if "fx" in cats:
+        return KIND_EFFECT
+    return ""
 
 
 def _is_year_or_version(s: str) -> bool:

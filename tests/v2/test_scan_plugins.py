@@ -130,3 +130,26 @@ class TestGrouping:
         groups = group_by_product(scan_plugins([str(tmp_path)]).plugins)
         assert [g.product_name for g in groups] == ["Other", "Serum"]
         assert groups[1].format_names == ["VST3", "AU", "CLAP"]
+
+
+class TestKind:
+    def test_au_type_codes(self, tmp_path):
+        for name, code, kind in (("Synth.component", "aumu", "Instrument"), ("Verb.component", "aufx", "Effect"),
+                                 ("Gate.component", "aumf", "Effect"), ("Arp.component", "aumi", "MIDI"),
+                                 ("Odd.component", "augn", "")):
+            b = make_bundle(tmp_path, name, _plist(AudioComponents=[{"type": code, "name": "Acme: X"}]))
+            assert bundle_metadata(b)["kind"] == kind, name
+
+    def test_vst3_moduleinfo_json5(self, tmp_path):
+        inst = make_bundle(tmp_path, "Synth.vst3", _plist())
+        (inst / "Contents" / "Resources").mkdir()
+        (inst / "Contents" / "Resources" / "moduleinfo.json").write_text(
+            '{"Classes": [{"Category": "Audio Module Class", "Sub Categories": ["Instrument", "Synth",],},],}')
+        fx = make_bundle(tmp_path, "Verb.vst3", _plist())
+        (fx / "Contents" / "Resources").mkdir()
+        (fx / "Contents" / "Resources" / "moduleinfo.json").write_text('{"Classes": [{"Sub Categories": ["Fx", "Reverb"]}]}')
+        assert bundle_metadata(inst)["kind"] == "Instrument"
+        assert bundle_metadata(fx)["kind"] == "Effect"
+
+    def test_unknown_without_metadata(self, tmp_path):
+        assert bundle_metadata(make_bundle(tmp_path, "X.vst", _plist()))["kind"] == ""

@@ -72,6 +72,9 @@ class NativeBridge:
     def open_url(self, url: str) -> None:
         subprocess.run(["open", url], check=False)
 
+    def copy_to_clipboard(self, text: str) -> None:
+        subprocess.run(["pbcopy"], input=text, text=True, check=False)
+
     def move_to_trash(self, path: str) -> None:
         from Foundation import NSURL, NSFileManager
 

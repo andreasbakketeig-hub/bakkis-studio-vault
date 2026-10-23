@@ -28,6 +28,7 @@ class FakeNative:
         self.revealed: list[str] = []
         self.opened: list[str] = []
         self.trashed: list[str] = []
+        self.copied: list[str] = []
 
     def choose_open_file(self, file_types):
         return self.open_result
@@ -45,13 +46,16 @@ class FakeNative:
     def open_url(self, url):
         self.opened.append(url)
 
+    def copy_to_clipboard(self, text):
+        self.copied.append(text)
+
     def move_to_trash(self, path):
         self.trashed.append(path)
         Path(path).unlink()
 
 
 PLUGINS = [Plugin("Serum", "VST3", "/Users/x/Library/Audio/Plug-Ins/VST3/Serum.vst3", "1.36", "Xfer Records",
-                  "com.xferrecords.Serum", 100, "2026-01-01"),
+                  "com.xferrecords.Serum", 100, "2026-01-01", "Instrument"),
            Plugin("Pro-Q 3", "AU", "/Library/Audio/Plug-Ins/Components/Pro-Q 3.component", "3.2", "FabFilter",
                   "com.fabfilter.Pro-Q.3", 50, "2026-01-01")]
 APPS = [SimpleNamespace(name="Ableton Live 12 Suite", category="DAW", developer="Ableton", version="12.1",
@@ -345,3 +349,16 @@ def test_report_problem_mail_is_prefilled(vault):
     url = vault.about()["report_url"]
     assert url.startswith("mailto:bakkis@bakkis.com?subject=")
     assert "macOS" in url and " " not in url
+
+
+def test_product_kind_vendor_url_and_copy_path(vault, native, scanners):
+    scanners["plugins"].append(Plugin("Serum", "AAX", "/Library/x/Serum.aaxplugin", "1.36", "Xfer Records"))
+    run_scan(vault)
+    serum = next(p for p in vault.inventory("current")["products"] if p["name"] == "Serum")
+    assert serum["kind"] == "Instrument"            # AAX copy inherits it from the VST3
+    assert serum["vendor_url"].startswith("https://")
+    res = vault.copy_path(serum["path"])
+    assert res["ok"] and native.copied == [res["path"]]
+    assert native.copied[0].endswith("/Library/Audio/Plug-Ins/VST3/Serum.vst3")
+    assert not native.copied[0].startswith("~")
+    assert vault.copy_path("")["ok"] is False

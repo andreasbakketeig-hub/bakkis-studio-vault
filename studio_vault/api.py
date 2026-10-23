@@ -30,7 +30,7 @@ from studio_vault import snapshot as snap
 from studio_vault.compare import compare
 from studio_vault.scanners.apps import scan_music_apps
 from studio_vault.scanners.hardware import scan_hardware
-from studio_vault.scanners.plugins import SCAN_PATHS, SizeCache, normalize_product_name, scan_plugins
+from studio_vault.scanners.plugins import FORMAT_ORDER, SCAN_PATHS, SizeCache, normalize_product_name, scan_plugins
 from studio_vault.vendors import match_vendor
 
 SCAN_IDLE = "idle"
@@ -55,6 +55,7 @@ class Native(Protocol):
     def reveal_in_finder(self, path: str) -> None: ...
     def open_url(self, url: str) -> None: ...
     def move_to_trash(self, path: str) -> None: ...
+    def copy_to_clipboard(self, text: str) -> None: ...
 
 
 class ApiError(Exception):
@@ -67,6 +68,10 @@ def _ok(**data: Any) -> dict:
 
 def _fail(message: str) -> dict:
     return {"ok": False, "error": message}
+
+
+def _format_rank(fmt: str) -> int:
+    return FORMAT_ORDER.index(fmt) if fmt in FORMAT_ORDER else len(FORMAT_ORDER)
 
 
 def _safe_name(text: str) -> str:
@@ -257,22 +262,26 @@ class Api:
         groups: dict[str, dict] = {}
         for p in s.plugins:
             g = groups.setdefault(normalize_product_name(p.name), {
-                "name": p.name, "developer": "", "bundle_id": "", "version": "",
-                "formats": [], "size": 0, "path": p.path,
+                "name": p.name, "developer": "", "bundle_id": "", "version": "", "kind": "",
+                "formats": [], "size": 0, "path": "",
             })
             if p.fmt not in g["formats"]:
                 g["formats"].append(p.fmt)
+            # Point Finder/copy at the most common format's copy (VST3 → AU → CLAP → VST → AAX).
+            if _format_rank(p.fmt) < _format_rank(g.get("_path_fmt", "")):
+                g["path"], g["_path_fmt"] = p.path, p.fmt
             g["size"] += p.size
-            for key in ("developer", "bundle_id", "version"):
+            for key in ("developer", "bundle_id", "version", "kind"):
                 g[key] = g[key] or getattr(p, key)
-        order = ["VST3", "AU", "CLAP", "VST", "AAX"]
         out = []
         for g in groups.values():
             vendor = match_vendor(g["developer"], g["bundle_id"])
             g["vendor"] = vendor.name if vendor else g["developer"]
+            g["vendor_url"] = vendor.download_url if vendor else ""
             g["matched"] = vendor is not None
-            g["formats"].sort(key=lambda f: order.index(f) if f in order else len(order))
+            g["formats"].sort(key=_format_rank)
             del g["bundle_id"]
+            g.pop("_path_fmt", None)
             out.append(g)
         return sorted(out, key=lambda g: g["name"].lower())
 
@@ -471,6 +480,16 @@ class Api:
                 raise ApiError("Not found on this Mac.")
             self._require_native().reveal_in_finder(real)
             return _ok()
+        return self._guard(run)
+
+    def copy_path(self, path: str) -> dict:
+        """Copy a plug-in or app path (as stored, "~/…") to the clipboard as a full path."""
+        def run() -> dict:
+            real = os.path.expanduser(path or "")
+            if not real.startswith("/"):
+                raise ApiError("No path to copy.")
+            self._require_native().copy_to_clipboard(real)
+            return _ok(path=real)
         return self._guard(run)
 
     def open_url(self, url: str) -> dict:

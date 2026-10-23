@@ -21,7 +21,7 @@ File layout (schema_version 2):
       "app_version": "2.0.0",
       "macos_version": "27.0",
       "source": "scan" | "import-v1",
-      "plugins":  [{"name", "fmt", "developer", "version", "bundle_id", "size", "modified", "path"}],
+      "plugins":  [{"name", "fmt", "developer", "version", "bundle_id", "size", "modified", "path", "kind"}],
       "apps":     [{"name", "category", "developer", "version", "path"}],
       "hardware": [{"name", "vendor", "device_type", "connection_type"}]
     }
@@ -69,6 +69,7 @@ class SnapPlugin:
     size: int = 0
     modified: str = ""
     path: str = ""
+    kind: str = ""          # Instrument | Effect | MIDI | ""
 
 
 @dataclass(frozen=True)
@@ -201,7 +202,7 @@ def from_scan(
             (SnapPlugin(
                 name=p.name, fmt=p.fmt, developer=p.developer, version=p.version,
                 bundle_id=getattr(p, "bundle_id", ""), size=p.file_size,
-                modified=p.modified, path=scrub_path(p.path),
+                modified=p.modified, path=scrub_path(p.path), kind=getattr(p, "kind", ""),
             ) for p in plugins),
             key=lambda p: (p.name.lower(), p.fmt),
         ),
@@ -243,7 +244,7 @@ def _plugin(d: dict) -> SnapPlugin:
         name=_s(d, "name"), fmt=_s(d, "fmt"), developer=_s(d, "developer"),
         version=_s(d, "version"), bundle_id=_s(d, "bundle_id"),
         size=_i(d, "size") or _i(d, "file_size"), modified=_s(d, "modified"),
-        path=scrub_path(_s(d, "path")),
+        path=scrub_path(_s(d, "path")), kind=_s(d, "kind"),
     )
 
 
