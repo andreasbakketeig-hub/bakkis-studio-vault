@@ -1,6 +1,6 @@
 # BAKKIS STUDIO VAULT v2 — rebuild plan
 
-Status: plan written 2026-10-23, nothing built yet. Branch `v2-pywebview` (off `feature/license-vault`).
+Status: plan written and decisions approved 2026-10-23, nothing built yet. Branch `v2-pywebview` (off `feature/license-vault`).
 Owner: Andreas (BAKKIS). Communicate with him in Norwegian; code, comments and commits in English.
 
 ## Goal
@@ -33,7 +33,6 @@ hardware) as a **snapshot over time** with a **new-Mac migration checklist**. Th
 | What changed | Compare the current scan with the last snapshot (or any two snapshots): added, removed, version changed. Shown on the home screen after each scan. |
 | Migration checklist | From a snapshot of the old Mac, build a checklist for the new Mac, grouped **by vendor**: what to install, which manager app installs it (Native Access, Plugin Alliance, Waves Central …), which license system it uses (iLok, vendor account, serial), and a link to the vendor's download page. Items tick off automatically when a rescan finds them; manual tick for the rest. Progress saved. |
 | Hardware checklist | Interfaces / controllers from the old snapshot: "connect and install driver", with the vendor link where known. |
-| License notes | Per vendor: account e-mail, serial, notes. Stored in the **macOS Keychain**, never in snapshot files. Optional "include in export" is **off** and not offered in v2.0. |
 | Export | Snapshot file (`.studiovault`, JSON) to move between Macs (AirDrop / iCloud / USB). Printable HTML report and CSV of the checklist. |
 | Inventory | Searchable tables for plug-ins, apps and hardware (read-only). Format coverage per plug-in (folds in v1 "Format Analysis" as a column). |
 
@@ -44,15 +43,15 @@ hardware) as a **snapshot over time** with a **new-Mac migration checklist**. Th
 - Plug-in Health, Plugin Insights, the v1 Studio Overview dashboard, the 1,500-line Settings view.
 - Any network traffic except opening links in the browser. No accounts, no cloud sync, no analytics.
 
-## Decisions (proposed — Andreas to confirm the ones marked ❓)
+## Decisions (approved by Andreas, 2026-10-23)
 
 | Topic | Decision |
 |---|---|
 | UI toolkit | Leave CustomTkinter. **pywebview** (WKWebView) + HTML/CSS/JS, no build step, no framework. Same as Music Sorter. |
 | Backend bridge | pywebview `js_api` (no local HTTP server needed — there is no audio to stream). |
 | Read-only | Hard rule: the app only reads the system. Writes go to its own data folder, the Keychain, and export files the user picks. |
-| Storage | JSON snapshot files (source of truth) + one small JSON settings/checklist-state file. **Drop the SQLite layer** from v1 (`app/db/`). ❓ |
-| App name | ❓ **BAKKIS STUDIO VAULT** (matches the repo; v1 used "Bakkis Studio Manager"). Bundle id `com.bakkis.studio-vault`, version 2.0.0. |
+| Storage | JSON snapshot files (source of truth) + one small JSON settings/checklist-state file. **Drop the SQLite layer** from v1 (`app/db/`). |
+| App name | **BAKKIS STUDIO VAULT** (matches the repo; v1 used "Bakkis Studio Manager"). Bundle id `com.bakkis.studio-vault`, version 2.0.0. |
 | Data folder | `~/Library/Application Support/BAKKIS STUDIO VAULT/` (snapshots/, settings.json, checklists/). Import v1 snapshots from `~/Library/Application Support/BakkisStudioManager/` on first launch. |
 | Privacy in shared files | Snapshot exports contain no serials, no Keychain data, and replace the home folder in paths with `~`. Machine id is a salted hash, not the raw IOPlatformUUID. Hostname kept (user can rename the snapshot). |
 | Platform | macOS only. Universal app (Apple Silicon + Intel), python.org Python 3.12 universal2, minimum macOS 13 Ventura. |
@@ -62,7 +61,7 @@ hardware) as a **snapshot over time** with a **new-Mac migration checklist**. Th
 | Promo & support | Discreet, as Music Sorter: About section with follow links (bakkis.com, Instagram, songshare), Ko-fi, `.github/FUNDING.yml`. No popups. |
 | Contact | `bakkis@bakkis.com` in README and Settings → About; "Report a problem" (prefilled e-mail with app + macOS version). |
 | Language | English everywhere: UI, README, docs. |
-| License notes in v2.0 | ❓ In v2.0 (Keychain), or postpone to v2.1 and ship scan/snapshot/checklist first. |
+| License notes | **Postponed to v2.1.** v2.0 ships scan, snapshots, compare and checklist; the checklist already shows each vendor's license system. |
 
 ## Problems found in v1 (fix or avoid in v2)
 
@@ -104,13 +103,13 @@ studio_vault/
   snapshot.py      schema v2 dataclasses, save/load/list, import of v1 files (both formats), privacy scrubbing on export
   compare.py       diff two snapshots (added / removed / version changed), per category
   checklist.py     build migration checklist from a snapshot + current scan; persisted tick state per checklist
-  keychain.py      license notes via `security add-generic-password` / `find-generic-password` (service "BAKKIS STUDIO VAULT")
+  keychain.py      (v2.1) license notes via `security add-generic-password` / `find-generic-password` (service "BAKKIS STUDIO VAULT")
   report.py        HTML report (printable) and CSV export
   api.py           the js_api class: thin, JSON in/out, long work on a worker thread, results pushed with evaluate_js
   app.py           pywebview window, file dialogs, reveal in Finder, open links, shutdown
   web/             index.html, app.css, app.js
 main.py            entry point
-tests/             pytest: scanners (with recorded system_profiler fixtures), snapshot round-trip + v1 import, compare, checklist, keychain (mocked)
+tests/             pytest: scanners (with recorded system_profiler fixtures), snapshot round-trip + v1 import, compare, checklist, keychain (mocked, v2.1)
 ```
 
 ## Performance requirements
@@ -137,7 +136,7 @@ Settings and About are a drawer (gear icon), not a page. First launch: one scree
 - `snapshots/*.studiovault` — JSON, schema v2
 - `checklists/<snapshot-id>.json` — tick state
 
-Keychain: generic passwords, service `BAKKIS STUDIO VAULT`, account = vendor key.
+Keychain (v2.1): generic passwords, service `BAKKIS STUDIO VAULT`, account = vendor key.
 
 ## Packaging (macOS)
 
@@ -149,19 +148,20 @@ notarization, zip named `BAKKIS-STUDIO-VAULT-x.y.z.zip`. `PACKAGING.md` document
 - Add `LICENSE` (MIT + logo exclusion), `.github/FUNDING.yml` (`ko_fi: bakkis`), `pytest.ini`, `requirements-dev.txt`, `requirements-packaging.txt`.
 - Rewrite `README.md` for v2 (what it does, install, first launch of an unsigned app, privacy, follow/support links).
 - `.gitignore`: stop ignoring all `*.csv` (only ignore exports in the repo root), add `.pytest_cache/`.
-- Merge `feature/license-vault` into `main` and tag `v1-final` before v2 lands, so v1 stays reachable. ❓
-- Delete merged remote branch `cursor/format-analysis-view`. ❓
+- Done 2026-10-23: `feature/license-vault` merged into `main`, tagged `v1-final`.
+- Done 2026-10-23: merged branch `cursor/format-analysis-view` deleted.
 
 ## Milestones
 
 1. Install Python 3.12 universal2, fresh `.venv`. Scaffold `studio_vault/`, `config.py`, port scanners + tests (add CLAP, size cache, fake `system_profiler`).
 2. `vendors.py`, `snapshot.py` (schema v2, v1 import, privacy scrubbing), `compare.py` + tests.
-3. `checklist.py`, `keychain.py`, `report.py` + tests.
+3. `checklist.py`, `report.py` + tests.
 4. `api.py` + `app.py`: pywebview window, background scan with progress, file dialogs, drag-and-drop import.
 5. Frontend: My Studio, Snapshots, New Mac, Inventory, settings drawer, first-launch screen.
 6. Packaging (universal, unsigned + signed), README, PACKAGING.md, LICENSE, FUNDING.yml. Test on a clean account.
 7. Real-world test: snapshot Andreas' studio Mac, restore checklist on a second Mac or user account. Fix gaps in `vendors.py`.
 8. Merge to `main`, tag `v2.0.0`, GitHub Release.
+9. v2.1: license notes per vendor in the macOS Keychain (`keychain.py`, notes button in the checklist). Never written to snapshot files.
 
 ## Testing
 
