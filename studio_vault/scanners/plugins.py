@@ -282,11 +282,11 @@ def _developer_from_plist(plist: dict) -> str:
         if isinstance(mfr, str) and len(mfr) > 2 and not _is_year_or_version(mfr):
             return mfr.strip()
 
-    # 2. CFBundleGetInfoString  e.g. "Plugin 2.0, © 2023 Acme Audio"
+    # 2. CFBundleGetInfoString  e.g. "Plugin 2.0, © 2023 Acme Audio" or "© 2016 - 2023 Korg Inc"
     info_str = str(plist.get("CFBundleGetInfoString", ""))
     if "©" in info_str:
         after_copy = info_str.split("©")[-1].strip()
-        after_copy = re.sub(r"^\d{4}(?:-\d{4})?\s*", "", after_copy)
+        after_copy = re.sub(r"^\d{4}(?:\s*[-–]\s*\d{4})?\s*", "", after_copy)
         candidate = re.split(r"[,.\n]", after_copy)[0].strip()
         if candidate and not _is_year_or_version(candidate):
             return candidate
@@ -296,7 +296,7 @@ def _developer_from_plist(plist: dict) -> str:
     copyright_str = str(plist.get("NSHumanReadableCopyright", ""))
     if copyright_str:
         match = re.search(
-            r"©\s*\d{4}(?:-\d{4})?\s*([\w][\w\s&\-]*?)(?:\s*,|\s*\.|Inc|LLC|Ltd|GmbH|AB|BV|$)",
+            r"©\s*\d{4}(?:\s*[-–]\s*\d{4})?\s*([\w][\w\s&\-]*?)(?:\s*,|\s*\.|Inc|LLC|Ltd|GmbH|AB|BV|$)",
             copyright_str,
         )
         if match:

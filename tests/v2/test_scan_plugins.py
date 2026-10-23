@@ -80,6 +80,10 @@ class TestDeveloper:
         b = make_bundle(tmp_path, "X.vst3", _plist(bundle_id="", NSHumanReadableCopyright="© 2001-2023 Acme Audio, Inc."))
         assert bundle_metadata(b)["developer"] == "Acme Audio"
 
+    def test_copyright_year_range_with_spaces(self, tmp_path):
+        b = make_bundle(tmp_path, "X.vst3", _plist(bundle_id="", CFBundleGetInfoString="M1 1.0, © 2016 - 2023 Korg Inc."))
+        assert bundle_metadata(b)["developer"] == "Korg Inc"
+
     def test_bundle_id_fallback(self, tmp_path):
         b = make_bundle(tmp_path, "X.vst3", _plist(bundle_id="com.u-he.diva"))
         assert bundle_metadata(b)["developer"] == "U He"
