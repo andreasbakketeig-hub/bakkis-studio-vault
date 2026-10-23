@@ -1,6 +1,6 @@
 # BAKKIS STUDIO VAULT v2 — rebuild plan
 
-Status: plan written and decisions approved 2026-10-23, nothing built yet. Branch `v2-pywebview` (off `feature/license-vault`).
+Status: milestone 1 done 2026-10-23 (package scaffold, config, scanners ported with CLAP + size cache, tests in `tests/v2/`). Next: milestone 2. Branch `v2-pywebview` (off `feature/license-vault`).
 Owner: Andreas (BAKKIS). Communicate with him in Norwegian; code, comments and commits in English.
 
 ## Goal
@@ -74,6 +74,7 @@ hardware) as a **snapshot over time** with a **new-Mac migration checklist**. Th
 7. **Not runnable on this Mac right now**: `.venv` points at a Python 3.12 that is no longer installed (only `/usr/bin/python3` 3.9 is present) and the UI uses `match` (3.10+). Core tests pass on 3.9 (290 passed). Install python.org 3.12 universal2 before milestone 1.
 8. **README is outdated** (lists modules as "Coming soon" that exist), no LICENSE, no packaging script, `.gitignore` ignores every `*.csv`.
 9. **`main` is behind**: all work since "Cleanup Recommendation Actionability Layer" lives on `feature/license-vault`. Stale branch `cursor/format-analysis-view` is already merged.
+10. **Core MIDI fallback in `hardware_scanner.py` segfaults** on this Mac (pointers passed to `CFRelease` without argtypes get truncated). Only hit when `system_profiler SPMIDIDataType` is empty, which it is here. Fixed in v2 by reusing the MIDI scanner's Core MIDI reader; v1 still has the bug.
 
 ## What to reuse from v1
 

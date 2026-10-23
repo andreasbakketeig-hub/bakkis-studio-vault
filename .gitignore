@@ -30,4 +30,7 @@ Icon?
 *.swo
 
 # Exports
-*.csv
+/*.csv
+
+# Tools
+.pytest_cache/
