@@ -8,7 +8,7 @@ A macOS desktop app for managing your professional studio setup — built with P
 |--------|--------|
 | Plug-in Scanner | ✅ Available |
 | License Manager | 🔜 Coming soon |
-| Hardware Inventory | 🔜 Coming soon |
+| Hardware Inventory | ✅ Available (connected device scan) |
 | MIDI Devices | 🔜 Coming soon |
 | Studio Mapper | 🔜 Coming soon |
 

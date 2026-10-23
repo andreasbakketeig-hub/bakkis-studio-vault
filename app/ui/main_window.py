@@ -26,9 +26,12 @@ from app.ui.views.migration_assistant import MigrationAssistantView
 from app.ui.views.settings import SettingsView
 from app.ui.views.coming_soon import ComingSoonView
 from app.ui.views.hardware_inventory import HardwareInventoryView
+from app.ui.views.midi_devices import MidiDevicesView
+from app.ui.views.audio_devices import AudioDevicesView
 from app.ui.views.license_vault import LicenseVaultView
 from app.ui.views.studio_snapshots import StudioSnapshotsView
 from app.core.hardware_scanner import HardwareDevice
+from app.core.midi_scanner import MidiDevice
 
 BG_MAIN = "#0D0F18"
 BG_CONTENT = "#10131C"
@@ -106,6 +109,7 @@ class MainWindow(ctk.CTk):
         self._plugin_scan_in_progress: bool = False
 
         self._hardware_devices: list[HardwareDevice] = []
+        self._midi_devices: list[MidiDevice] = []
         if self._app_settings.auto_load_cache:
             self._plugins, self._plugin_scan_ts = self._plugin_repo.load_latest()
             self._music_apps, self._apps_scan_ts = self._apps_repo.load_latest()
@@ -283,6 +287,10 @@ class MainWindow(ctk.CTk):
         if "studio_snapshots" in self._views:
             self._views["studio_snapshots"].refresh(hardware_devices=devices)  # type: ignore[union-attr]
 
+    def _on_midi_ready(self, devices: list[MidiDevice]) -> None:
+        """Called by MidiDevicesView when a scan completes."""
+        self._midi_devices = devices
+
     # ── View factory ──────────────────────────────────────────────────────────
 
     def _create_view(self, key: str) -> ctk.CTkFrame:
@@ -309,6 +317,15 @@ class MainWindow(ctk.CTk):
                     on_hardware_ready=self._on_hardware_ready,
                 )
                 return view
+
+            case "midi":
+                return MidiDevicesView(
+                    self._content_area,
+                    on_ready=self._on_midi_ready,
+                )
+
+            case "audio_devices":
+                return AudioDevicesView(self._content_area)
 
             case "plugins":
                 return PluginScannerView(

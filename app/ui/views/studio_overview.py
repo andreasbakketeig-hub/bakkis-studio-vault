@@ -13,15 +13,15 @@ from typing import Callable
 import customtkinter as ctk
 
 from app.core.scanner import Plugin, analyze_formats
-from app.core.health import analyze_health
 from app.core.cleanup import analyze_cleanup
+from app.core.plugin_insights import analyze_insights, insight_options_from_settings
 from app.core.music_software_scanner import (
     MusicApp,
     CATEGORY_DAW,
     CATEGORY_LICENSE_MANAGER,
-    CATEGORY_HARDWARE_UTILITY,
     CATEGORY_PLUGIN_MANAGER,
 )
+from app.core.hardware_scanner import HardwareDevice
 
 # ── Premium Design System ─────────────────────────────────────────────────────
 BG_CONTENT   = "#0E111E"
@@ -75,6 +75,40 @@ def _username() -> str:
         return name.replace(".", " ").replace("_", " ").title()
     except Exception:
         return "there"
+
+
+def _bind_tooltip(widget: tk.Widget, text: str) -> None:
+    """Show full *text* in a small floating label on hover."""
+    tip_win: list[tk.Toplevel | None] = [None]
+
+    def _show(_event=None) -> None:
+        if not text or tip_win[0] is not None:
+            return
+        tw = tk.Toplevel(widget)
+        tw.wm_overrideredirect(True)
+        tw.configure(bg=BORDER_BRIGHT)
+        tk.Label(
+            tw,
+            text=text,
+            bg=BORDER_BRIGHT,
+            fg=TEXT_PRIMARY,
+            font=("SF Pro Text", 10),
+            padx=8,
+            pady=4,
+        ).pack()
+        tw.update_idletasks()
+        x = widget.winfo_rootx() + 8
+        y = widget.winfo_rooty() + widget.winfo_height() + 4
+        tw.geometry(f"+{x}+{y}")
+        tip_win[0] = tw
+
+    def _hide(_event=None) -> None:
+        if tip_win[0] is not None:
+            tip_win[0].destroy()
+            tip_win[0] = None
+
+    widget.bind("<Enter>", _show, add="+")
+    widget.bind("<Leave>", _hide, add="+")
 
 
 # ── Canvas chart helpers ──────────────────────────────────────────────────────
@@ -229,13 +263,17 @@ class StudioOverviewView(ctk.CTkFrame):
         self,
         parent: ctk.CTkFrame,
         on_navigate: Callable[[str], None] | None = None,
+        on_rescan_all: Callable[[], None] | None = None,
         settings=None,
         **kwargs,
     ):
         super().__init__(parent, fg_color="transparent", **kwargs)
         self._on_navigate = on_navigate
+        self._on_rescan_all = on_rescan_all
+        self._rescan_btn: ctk.CTkButton | None = None
         self._plugins: list[Plugin] = []
         self._apps: list[MusicApp] = []
+        self._hardware: list[HardwareDevice] = []
         self._lbl: dict[str, ctk.CTkLabel] = {}
         self._bar: dict[str, ctk.CTkProgressBar] = {}
         self._vendor_frame: ctk.CTkFrame | None = None
@@ -254,10 +292,22 @@ class StudioOverviewView(ctk.CTkFrame):
         self._migration_threshold: int = (
             settings.migration_readiness_threshold if settings else 80
         )
+        self._settings = settings
 
         self._build()
 
     # ── Public API ─────────────────────────────────────────────────────────────
+
+    def update_settings(self, settings) -> None:
+        """Apply updated settings — currently refreshes the welcome name."""
+        self._settings = settings
+        name = (
+            settings.user_full_name.strip()
+            if settings and settings.user_full_name.strip()
+            else _username()
+        )
+        if hasattr(self, "_welcome_lbl"):
+            self._welcome_lbl.configure(text=f"Welcome back, {name}.")
 
     def refresh(self, plugins: list[Plugin]) -> None:
         self._plugins = plugins
@@ -267,13 +317,25 @@ class StudioOverviewView(ctk.CTkFrame):
         self._apps = apps
         self._update_app_stats()
 
+    def refresh_hardware(self, devices: list[HardwareDevice]) -> None:
+        self._hardware = devices
+        n = sum(1 for d in devices if d.is_connected)
+        self._lbl["snap_hardware"].configure(text=str(n))
+
+    def set_scan_status(self, message: str, *, scanning: bool = False) -> None:
+        """Update header scan status and Rescan All button state."""
+        if self._last_scan_lbl is not None:
+            self._last_scan_lbl.configure(text=message)
+        if self._rescan_btn is not None:
+            self._rescan_btn.configure(state="disabled" if scanning else "normal")
+
     # ── Layout ────────────────────────────────────────────────────────────────
 
     def _build(self) -> None:
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)
         self._build_header()
-        self._build_scroll()
+        self._build_body()
 
     def _build_header(self) -> None:
         hdr = ctk.CTkFrame(self, fg_color=BG_CARD, corner_radius=0)
@@ -281,15 +343,20 @@ class StudioOverviewView(ctk.CTkFrame):
         hdr.grid_columnconfigure(1, weight=1)
 
         left = ctk.CTkFrame(hdr, fg_color="transparent")
-        left.grid(row=0, column=0, sticky="w", padx=30, pady=(22, 20))
+        left.grid(row=0, column=0, sticky="w", padx=24, pady=(14, 12))
 
-        name = _username()
-        ctk.CTkLabel(
+        name = (
+            self._settings.user_full_name.strip()
+            if self._settings and self._settings.user_full_name.strip()
+            else _username()
+        )
+        self._welcome_lbl = ctk.CTkLabel(
             left,
             text=f"Welcome back, {name}.",
             font=ctk.CTkFont(family="SF Pro Display", size=22, weight="bold"),
             text_color=TEXT_PRIMARY,
-        ).pack(anchor="w")
+        )
+        self._welcome_lbl.pack(anchor="w")
         ctk.CTkLabel(
             left,
             text="Here's an overview of your studio.",
@@ -313,7 +380,7 @@ class StudioOverviewView(ctk.CTkFrame):
             ).pack(anchor="w", pady=(2, 0))
 
         right = ctk.CTkFrame(hdr, fg_color="transparent")
-        right.grid(row=0, column=1, sticky="e", padx=30)
+        right.grid(row=0, column=1, sticky="e", padx=24)
 
         ts = datetime.now().strftime("%b %d, %Y")
         self._last_scan_lbl = ctk.CTkLabel(
@@ -324,8 +391,8 @@ class StudioOverviewView(ctk.CTkFrame):
         )
         self._last_scan_lbl.pack(side="right", padx=(12, 0))
 
-        if self._on_navigate:
-            ctk.CTkButton(
+        if self._on_rescan_all:
+            self._rescan_btn = ctk.CTkButton(
                 right,
                 text="  ⟳  Rescan All",
                 width=130,
@@ -337,15 +404,17 @@ class StudioOverviewView(ctk.CTkFrame):
                 text_color=TEXT_PRIMARY,
                 border_width=1,
                 border_color=ACCENT,
-                command=lambda: self._on_navigate("plugins"),
-            ).pack(side="right")
+                command=self._on_rescan_all,
+            )
+            self._rescan_btn.pack(side="right")
 
         # Bottom border on header
         ctk.CTkFrame(hdr, height=1, fg_color=BORDER).grid(
             row=1, column=0, columnspan=2, sticky="ew",
         )
 
-    def _build_scroll(self) -> None:
+    def _build_body(self) -> None:
+        # Scrollable body — rows size to content; page scrolls when taller than viewport.
         body = ctk.CTkScrollableFrame(
             self,
             fg_color="transparent",
@@ -359,28 +428,28 @@ class StudioOverviewView(ctk.CTkFrame):
         self._build_kpi_row(body, row=0)
 
         mid = ctk.CTkFrame(body, fg_color="transparent")
-        mid.grid(row=1, column=0, sticky="ew", padx=24, pady=(16, 0))
+        mid.grid(row=1, column=0, sticky="ew", padx=20, pady=(10, 0))
         for c in range(3):
             mid.grid_columnconfigure(c, weight=1, uniform="mid")
-        self._build_formats(mid, col=0, padx=(0, 8))
-        self._build_health(mid, col=1, padx=(8, 8))
-        self._build_migration(mid, col=2, padx=(8, 0))
+        self._build_formats(mid, col=0, padx=(0, 6))
+        self._build_health(mid, col=1, padx=(6, 6))
+        self._build_migration(mid, col=2, padx=(6, 0))
 
         bot = ctk.CTkFrame(body, fg_color="transparent")
-        bot.grid(row=2, column=0, sticky="ew", padx=24, pady=(12, 0))
+        bot.grid(row=2, column=0, sticky="ew", padx=20, pady=(8, 0))
         for c in range(3):
             bot.grid_columnconfigure(c, weight=1, uniform="bot")
-        self._build_storage(bot, col=0, padx=(0, 8))
-        self._build_vendors(bot, col=1, padx=(8, 8))
-        self._build_quick_actions(bot, col=2, padx=(8, 0))
+        self._build_storage(bot, col=0, padx=(0, 6))
+        self._build_vendors(bot, col=1, padx=(6, 6))
+        self._build_quick_actions(bot, col=2, padx=(6, 0))
 
-        ctk.CTkFrame(body, height=28, fg_color="transparent").grid(row=3, column=0)
+        ctk.CTkFrame(body, height=16, fg_color="transparent").grid(row=3, column=0)
 
     # ── KPI Row ───────────────────────────────────────────────────────────────
 
     def _build_kpi_row(self, parent: ctk.CTkFrame, row: int) -> None:
         g = ctk.CTkFrame(parent, fg_color="transparent")
-        g.grid(row=row, column=0, sticky="ew", padx=24, pady=(24, 0))
+        g.grid(row=row, column=0, sticky="ew", padx=20, pady=(14, 0))
         for c in range(6):
             g.grid_columnconfigure(c, weight=1, uniform="kpi")
 
@@ -389,11 +458,11 @@ class StudioOverviewView(ctk.CTkFrame):
             ("snap_products", "⊞",  "PLUG-IN PRODUCTS",   "Unique products",   BLUE,    BLUE_DIM),
             ("snap_apps",     "♬",  "MUSIC APPLICATIONS", "Installed",         GREEN,   GREEN_DIM),
             ("snap_licenses", "⬡",  "LICENSE MANAGERS",   "Detected",         ORANGE,  ORANGE_DIM),
-            ("snap_hardware", "⬢",  "HARDWARE DEVICES",   "Detected",         TEAL,    TEAL_DIM),
+            ("snap_hardware", "⬢",  "HARDWARE DEVICES",   "Connected",        TEAL,    TEAL_DIM),
             ("snap_daws",     "♩",  "DAWs",               "Active DAWs",      PURPLE,  PURPLE_DIM),
         ]
         for col, (key, icon, title, sub, color, dim) in enumerate(kpi_defs):
-            padx = (0, 8) if col < 5 else (8, 0)
+            padx = (0, 6) if col < 5 else (6, 0)
             self._kpi_tile(g, col, key, icon, title, sub, color, dim, padx)
 
     def _kpi_tile(
@@ -412,38 +481,48 @@ class StudioOverviewView(ctk.CTkFrame):
             parent, fg_color=BG_KPI, corner_radius=12,
             border_width=1, border_color=BORDER_BRIGHT,
         )
-        tile.grid(row=0, column=col, sticky="nsew", padx=padx)
+        tile.grid(row=0, column=col, sticky="new", padx=padx)
         tile.grid_columnconfigure(1, weight=1)
 
         icon_box = ctk.CTkFrame(
-            tile, width=40, height=40, corner_radius=10, fg_color=dim_color,
+            tile, width=30, height=30, corner_radius=8, fg_color=dim_color,
         )
-        icon_box.grid(row=0, column=0, rowspan=3, padx=(14, 0), pady=16)
+        icon_box.grid(row=0, column=0, rowspan=3, padx=(10, 0), pady=10)
         icon_box.grid_propagate(False)
         ctk.CTkLabel(
             icon_box, text=icon,
-            font=ctk.CTkFont(size=16), text_color=color,
+            font=ctk.CTkFont(size=14), text_color=color,
         ).place(relx=0.5, rely=0.5, anchor="center")
 
-        ctk.CTkLabel(
+        title_lbl = ctk.CTkLabel(
             tile, text=title,
-            font=ctk.CTkFont(size=9, weight="bold"),
+            font=ctk.CTkFont(size=8, weight="bold"),
             text_color=TEXT_MUTED, anchor="w",
-        ).grid(row=0, column=1, sticky="sw", padx=(12, 14), pady=(14, 0))
+            wraplength=120,
+            justify="left",
+        )
+        title_lbl.grid(row=0, column=1, sticky="sw", padx=(8, 8), pady=(10, 0))
+        _bind_tooltip(title_lbl, title)
+
+        def _sync_kpi_title(_event=None, lbl=title_lbl, host=tile) -> None:
+            wrap = max(60, host.winfo_width() - 46)
+            lbl.configure(wraplength=wrap)
+
+        tile.bind("<Configure>", _sync_kpi_title, add="+")
 
         val_lbl = ctk.CTkLabel(
             tile, text="—",
-            font=ctk.CTkFont(size=26, weight="bold"),
+            font=ctk.CTkFont(size=22, weight="bold"),
             text_color=TEXT_PRIMARY, anchor="w",
         )
-        val_lbl.grid(row=1, column=1, sticky="w", padx=(12, 14))
+        val_lbl.grid(row=1, column=1, sticky="w", padx=(8, 8))
         self._lbl[key] = val_lbl
 
         ctk.CTkLabel(
             tile, text=subtitle,
-            font=ctk.CTkFont(size=9),
+            font=ctk.CTkFont(size=8),
             text_color=TEXT_MUTED, anchor="w",
-        ).grid(row=2, column=1, sticky="nw", padx=(12, 14), pady=(0, 14))
+        ).grid(row=2, column=1, sticky="nw", padx=(8, 8), pady=(0, 10))
 
     # ── Plugin Formats ────────────────────────────────────────────────────────
 
@@ -453,13 +532,13 @@ class StudioOverviewView(ctk.CTkFrame):
                        "Format distribution across your library", padx=padx)
 
         body = ctk.CTkFrame(c, fg_color="transparent")
-        body.grid(row=3, column=0, sticky="ew", padx=16, pady=(12, 0))
+        body.grid(row=3, column=0, sticky="ew", padx=14, pady=(8, 0))
         body.grid_columnconfigure(0, weight=0)
         body.grid_columnconfigure(1, weight=1)
 
         # Donut chart
-        self._fmt_donut = _DonutChart(body, size=118, bg_color=BG_CARD)
-        self._fmt_donut.grid(row=0, column=0, rowspan=4, padx=(4, 14), pady=4)
+        self._fmt_donut = _DonutChart(body, size=96, bg_color=BG_CARD)
+        self._fmt_donut.grid(row=0, column=0, rowspan=4, padx=(2, 10), pady=2)
         self._fmt_donut.render([], "—", "Total")
 
         # Format bars
@@ -470,7 +549,7 @@ class StudioOverviewView(ctk.CTkFrame):
             ("AAX",  PURPLE),
         ]):
             row_f = ctk.CTkFrame(body, fg_color="transparent")
-            row_f.grid(row=r, column=1, sticky="ew", pady=3)
+            row_f.grid(row=r, column=1, sticky="ew", pady=2)
             row_f.grid_columnconfigure(1, weight=1)
 
             ctk.CTkLabel(
@@ -496,10 +575,10 @@ class StudioOverviewView(ctk.CTkFrame):
 
         # Dup / recoverable summary
         ctk.CTkFrame(c, height=1, fg_color=BORDER).grid(
-            row=4, column=0, sticky="ew", padx=16, pady=(12, 0),
+            row=4, column=0, sticky="ew", padx=14, pady=(8, 0),
         )
         summary = ctk.CTkFrame(c, fg_color="transparent")
-        summary.grid(row=5, column=0, sticky="ew", padx=16, pady=(10, 16))
+        summary.grid(row=5, column=0, sticky="ew", padx=14, pady=(6, 10))
         summary.grid_columnconfigure(0, weight=1, uniform="fs")
         summary.grid_columnconfigure(1, weight=1, uniform="fs")
 
@@ -510,7 +589,7 @@ class StudioOverviewView(ctk.CTkFrame):
             c, text="Run  ◈ Plug-in Scanner  to populate format data",
             font=ctk.CTkFont(size=11), text_color=TEXT_MUTED,
         )
-        hint.grid(row=6, column=0, pady=(0, 16))
+        hint.grid(row=6, column=0, sticky="ew", padx=14, pady=(0, 14))
         self._lbl["fmt_hint"] = hint
 
     # ── Studio Health ─────────────────────────────────────────────────────────
@@ -521,16 +600,16 @@ class StudioOverviewView(ctk.CTkFrame):
                        "Plugin health status at a glance", padx=padx)
 
         ring_row = ctk.CTkFrame(c, fg_color="transparent")
-        ring_row.grid(row=3, column=0, sticky="ew", padx=16, pady=(14, 0))
+        ring_row.grid(row=3, column=0, sticky="ew", padx=14, pady=(8, 0))
         ring_row.grid_columnconfigure(0, weight=1)
 
-        self._health_ring = _ArcProgress(ring_row, size=108, bg_color=BG_CARD)
-        self._health_ring.grid(row=0, column=0, pady=4)
+        self._health_ring = _ArcProgress(ring_row, size=92, bg_color=BG_CARD)
+        self._health_ring.grid(row=0, column=0, pady=2)
         self._health_ring.render(0, center_text="—", center_sub="Health")
 
         # Health stats grid
         stats = ctk.CTkFrame(c, fg_color="transparent")
-        stats.grid(row=4, column=0, sticky="ew", padx=16, pady=(10, 0))
+        stats.grid(row=4, column=0, sticky="ew", padx=14, pady=(6, 0))
         for sc in range(2):
             stats.grid_columnconfigure(sc, weight=1, uniform="hs")
 
@@ -544,24 +623,24 @@ class StudioOverviewView(ctk.CTkFrame):
             r, c_idx = divmod(i, 2)
             f = ctk.CTkFrame(stats, fg_color=BG_KPI, corner_radius=8)
             f.grid(
-                row=r, column=c_idx, sticky="nsew",
+                row=r, column=c_idx, sticky="new",
                 padx=(pad[0], pad[1]), pady=(pad[2], pad[3]),
             )
             f.grid_columnconfigure(0, weight=1)
             ctk.CTkLabel(
                 f, text=label,
                 font=ctk.CTkFont(size=9), text_color=color, anchor="w",
-            ).grid(row=0, column=0, sticky="w", padx=10, pady=(8, 2))
+            ).grid(row=0, column=0, sticky="w", padx=8, pady=(6, 1))
             lbl = ctk.CTkLabel(
                 f, text="—",
-                font=ctk.CTkFont(size=18, weight="bold"),
+                font=ctk.CTkFont(size=16, weight="bold"),
                 text_color=color, anchor="w",
             )
-            lbl.grid(row=1, column=0, sticky="w", padx=10, pady=(0, 8))
+            lbl.grid(row=1, column=0, sticky="w", padx=8, pady=(0, 6))
             self._lbl[key] = lbl
 
         legacy = ctk.CTkFrame(c, fg_color=BG_CARD_INNER, corner_radius=8)
-        legacy.grid(row=5, column=0, sticky="ew", padx=16, pady=(8, 0))
+        legacy.grid(row=5, column=0, sticky="ew", padx=14, pady=(6, 0))
         legacy.grid_columnconfigure(1, weight=1)
         ctk.CTkLabel(
             legacy, text="Legacy VST2",
@@ -575,11 +654,22 @@ class StudioOverviewView(ctk.CTkFrame):
         leg_lbl.grid(row=0, column=1, sticky="e", padx=12)
         self._lbl["h_legacy"] = leg_lbl
 
+        insights_row = ctk.CTkLabel(
+            c,
+            text="—",
+            font=ctk.CTkFont(size=10),
+            text_color=TEXT_MUTED,
+            anchor="w",
+            wraplength=280,
+        )
+        insights_row.grid(row=6, column=0, sticky="ew", padx=14, pady=(4, 0))
+        self._lbl["h_insights"] = insights_row
+
         hint = ctk.CTkLabel(
             c, text="Run  ◈ Plug-in Scanner  to analyze health",
             font=ctk.CTkFont(size=11), text_color=TEXT_MUTED,
         )
-        hint.grid(row=6, column=0, pady=(12, 16))
+        hint.grid(row=7, column=0, sticky="ew", padx=14, pady=(8, 14))
         self._lbl["health_hint"] = hint
 
     # ── Migration Readiness ───────────────────────────────────────────────────
@@ -590,16 +680,16 @@ class StudioOverviewView(ctk.CTkFrame):
                        "Plugin & app migration progress", padx=padx)
 
         ring_row = ctk.CTkFrame(c, fg_color="transparent")
-        ring_row.grid(row=3, column=0, sticky="ew", padx=16, pady=(14, 0))
+        ring_row.grid(row=3, column=0, sticky="ew", padx=14, pady=(8, 0))
         ring_row.grid_columnconfigure(0, weight=1)
 
-        self._mig_ring = _ArcProgress(ring_row, size=108, bg_color=BG_CARD)
-        self._mig_ring.grid(row=0, column=0, pady=4)
+        self._mig_ring = _ArcProgress(ring_row, size=92, bg_color=BG_CARD)
+        self._mig_ring.grid(row=0, column=0, pady=2)
         self._mig_ring.render(0, center_text="—", center_sub="Ready",
                               color=GREEN, start_angle=220, arc_span=280)
 
         items_f = ctk.CTkFrame(c, fg_color="transparent")
-        items_f.grid(row=4, column=0, sticky="ew", padx=16, pady=(10, 0))
+        items_f.grid(row=4, column=0, sticky="ew", padx=14, pady=(6, 0))
         items_f.grid_columnconfigure(1, weight=1)
 
         mig_items = [
@@ -612,13 +702,13 @@ class StudioOverviewView(ctk.CTkFrame):
             ctk.CTkLabel(
                 items_f, text=label,
                 font=ctk.CTkFont(size=11), text_color=color, anchor="w",
-            ).grid(row=r, column=0, sticky="w", pady=5)
+            ).grid(row=r, column=0, sticky="w", pady=3)
             v = ctk.CTkLabel(
                 items_f, text="—",
-                font=ctk.CTkFont(size=13, weight="bold"),
+                font=ctk.CTkFont(size=12, weight="bold"),
                 text_color=color, anchor="e",
             )
-            v.grid(row=r, column=1, sticky="e", pady=5)
+            v.grid(row=r, column=1, sticky="e", pady=3)
             self._lbl[key] = v
 
         # Threshold label (below progress items)
@@ -629,27 +719,27 @@ class StudioOverviewView(ctk.CTkFrame):
             text_color=TEXT_MUTED,
             anchor="w",
         )
-        threshold_lbl.grid(row=5, column=0, sticky="w", padx=16, pady=(4, 0))
+        threshold_lbl.grid(row=5, column=0, sticky="w", padx=14, pady=(2, 0))
         self._lbl["mig_threshold"] = threshold_lbl
 
         if self._on_navigate:
             ctk.CTkButton(
                 c,
                 text="Open Migration Assistant  →",
-                height=34,
+                height=30,
                 corner_radius=8,
                 font=ctk.CTkFont(size=11),
                 fg_color=ACCENT_DIM,
                 hover_color=ACCENT,
                 text_color=TEXT_PRIMARY,
                 command=lambda: self._on_navigate("migration"),
-            ).grid(row=6, column=0, sticky="ew", padx=16, pady=(8, 16))
+            ).grid(row=6, column=0, sticky="ew", padx=14, pady=(8, 4))
 
         apps_hint = ctk.CTkLabel(
             c, text="Run  ♬ Music Software Scanner  to detect apps",
             font=ctk.CTkFont(size=10), text_color=TEXT_MUTED, anchor="w",
         )
-        apps_hint.grid(row=7, column=0, sticky="w", padx=16, pady=(0, 8))
+        apps_hint.grid(row=7, column=0, sticky="ew", padx=14, pady=(0, 14))
         self._lbl["mig_hint"] = apps_hint
 
     # ── Storage Overview ──────────────────────────────────────────────────────
@@ -660,14 +750,14 @@ class StudioOverviewView(ctk.CTkFrame):
                        "Plugin disk usage and redundant storage", padx=padx)
 
         kpi = ctk.CTkFrame(c, fg_color="transparent")
-        kpi.grid(row=3, column=0, sticky="ew", padx=16, pady=(14, 0))
+        kpi.grid(row=3, column=0, sticky="ew", padx=14, pady=(8, 0))
         kpi.grid_columnconfigure(0, weight=1, uniform="sk")
         kpi.grid_columnconfigure(1, weight=1, uniform="sk")
         self._mini_stat_card(kpi, 0, "stor_total", "Total Plugin Storage", ACCENT, (0, 6))
         self._mini_stat_card(kpi, 1, "stor_redu",  "Redundant Formats",    ORANGE, (6, 0))
 
         bar_wrap = ctk.CTkFrame(c, fg_color="transparent")
-        bar_wrap.grid(row=4, column=0, sticky="ew", padx=16, pady=(12, 0))
+        bar_wrap.grid(row=4, column=0, sticky="ew", padx=14, pady=(8, 0))
         bar_wrap.grid_columnconfigure(0, weight=1)
 
         ctk.CTkLabel(
@@ -692,16 +782,16 @@ class StudioOverviewView(ctk.CTkFrame):
         self._lbl["stor_pct"] = sp
 
         ctk.CTkFrame(c, height=1, fg_color=BORDER).grid(
-            row=5, column=0, sticky="ew", padx=16, pady=(12, 0),
+            row=5, column=0, sticky="ew", padx=14, pady=(8, 0),
         )
         ctk.CTkLabel(
             c, text="TOP DEVELOPERS",
             font=ctk.CTkFont(size=9, weight="bold"),
             text_color=TEXT_MUTED, anchor="w",
-        ).grid(row=6, column=0, sticky="w", padx=16, pady=(10, 4))
+        ).grid(row=6, column=0, sticky="w", padx=14, pady=(6, 2))
 
         self._vendor_frame = ctk.CTkFrame(c, fg_color="transparent")
-        self._vendor_frame.grid(row=7, column=0, sticky="ew", padx=16, pady=(0, 16))
+        self._vendor_frame.grid(row=7, column=0, sticky="ew", padx=14, pady=(0, 14))
         self._vendor_frame.grid_columnconfigure(0, weight=1)
 
         ctk.CTkLabel(
@@ -719,7 +809,7 @@ class StudioOverviewView(ctk.CTkFrame):
 
         self._vendor_bars_frame = ctk.CTkFrame(c, fg_color="transparent")
         self._vendor_bars_frame.grid(
-            row=3, column=0, sticky="ew", padx=16, pady=(14, 16),
+            row=3, column=0, sticky="ew", padx=14, pady=(8, 14),
         )
         self._vendor_bars_frame.grid_columnconfigure(0, weight=1)
 
@@ -747,7 +837,7 @@ class StudioOverviewView(ctk.CTkFrame):
             row_f = ctk.CTkFrame(c, fg_color=BG_ACTION, corner_radius=8)
             row_f.grid(
                 row=3 + i, column=0, sticky="ew",
-                padx=16, pady=(4 if i == 0 else 3, 4 if i == len(actions) - 1 else 3),
+                padx=14, pady=(3 if i == 0 else 2, 3 if i == len(actions) - 1 else 2),
             )
             row_f.grid_columnconfigure(0, weight=1)
 
@@ -755,7 +845,7 @@ class StudioOverviewView(ctk.CTkFrame):
                 row_f,
                 text=f"  {label}",
                 anchor="w",
-                height=38,
+                height=32,
                 corner_radius=7,
                 fg_color="transparent",
                 hover_color=BORDER_BRIGHT,
@@ -771,8 +861,7 @@ class StudioOverviewView(ctk.CTkFrame):
                 font=ctk.CTkFont(size=13), text_color=TEXT_MUTED,
             ).grid(row=0, column=1, sticky="e", padx=(0, 12))
 
-        # Spacer
-        ctk.CTkFrame(c, height=6, fg_color="transparent").grid(
+        ctk.CTkFrame(c, height=10, fg_color="transparent").grid(
             row=3 + len(actions), column=0,
         )
 
@@ -791,23 +880,23 @@ class StudioOverviewView(ctk.CTkFrame):
             parent, fg_color=BG_CARD, corner_radius=14,
             border_width=1, border_color=BORDER,
         )
-        c.grid(row=row, column=col, sticky="nsew", padx=padx)
+        c.grid(row=row, column=col, sticky="new", padx=padx)
         c.grid_columnconfigure(0, weight=1)
 
         ctk.CTkLabel(
             c, text=title,
             font=ctk.CTkFont(size=10, weight="bold"),
             text_color=TEXT_MUTED, anchor="w",
-        ).grid(row=0, column=0, sticky="w", padx=18, pady=(16, 0))
+        ).grid(row=0, column=0, sticky="w", padx=14, pady=(12, 0))
 
         ctk.CTkLabel(
             c, text=subtitle,
             font=ctk.CTkFont(size=10),
             text_color=BORDER_BRIGHT, anchor="w",
-        ).grid(row=1, column=0, sticky="w", padx=18, pady=(1, 0))
+        ).grid(row=1, column=0, sticky="w", padx=14, pady=(1, 0))
 
         ctk.CTkFrame(c, height=1, fg_color=BORDER).grid(
-            row=2, column=0, sticky="ew", padx=18, pady=(10, 0),
+            row=2, column=0, sticky="ew", padx=14, pady=(8, 0),
         )
         return c
 
@@ -826,13 +915,13 @@ class StudioOverviewView(ctk.CTkFrame):
         ctk.CTkLabel(
             f, text=label,
             font=ctk.CTkFont(size=9), text_color=TEXT_MUTED, anchor="w",
-        ).grid(row=0, column=0, sticky="w", padx=10, pady=(8, 2))
+        ).grid(row=0, column=0, sticky="w", padx=8, pady=(6, 1))
         lbl = ctk.CTkLabel(
             f, text="—",
-            font=ctk.CTkFont(size=18, weight="bold"),
+            font=ctk.CTkFont(size=16, weight="bold"),
             text_color=color, anchor="w",
         )
-        lbl.grid(row=1, column=0, sticky="w", padx=10, pady=(0, 8))
+        lbl.grid(row=1, column=0, sticky="w", padx=8, pady=(0, 6))
         self._lbl[key] = lbl
 
     # ── Data refresh ──────────────────────────────────────────────────────────
@@ -877,12 +966,16 @@ class StudioOverviewView(ctk.CTkFrame):
         self._lbl["fmt_space"].configure(text=_fmt_size(redu_bytes))
         self._lbl["fmt_hint"].grid_remove()
 
-        # Health
-        rep = analyze_health(plugins)
-        ok_count = rep.healthy_count
-        n_warn = len(rep.warnings)
-        n_dup = len(rep.duplicates)
-        n_bad = len(rep.broken)
+        # Health (single insights pass — matches Plugin Health settings)
+        ins = analyze_insights(
+            plugins,
+            self._apps,
+            **insight_options_from_settings(self._settings),
+        )
+        ok_count = ins.healthy_count
+        n_warn = len(ins.warnings)
+        n_dup = len(ins.duplicates)
+        n_bad = len(ins.broken)
         n_legacy = sum(1 for p in plugins if p.fmt == "VST")
 
         self._lbl["h_ok"].configure(text=f"{ok_count:,}")
@@ -891,7 +984,14 @@ class StudioOverviewView(ctk.CTkFrame):
         self._lbl["h_bad"].configure(text=f"{n_bad:,}")
         self._lbl["h_legacy"].configure(text=f"{n_legacy:,}")
 
-        score = ok_count / max(rep.total_plugins, 1)
+        n_ver = ins.version_conflict_products
+        n_stale = len(ins.stale_plugins)
+        n_upd = len(ins.update_guidance)
+        self._lbl["h_insights"].configure(
+            text=f"{n_ver} version conflicts · {n_stale} stale · {n_upd} update tips"
+        )
+
+        score = ok_count / max(ins.total_plugins, 1)
         bar_color = GREEN if score >= 0.8 else (ORANGE if score >= 0.5 else RED)
         pct_int = int(score * 100)
         quality = "Good" if score >= 0.8 else ("Fair" if score >= 0.5 else "Poor")
@@ -936,12 +1036,10 @@ class StudioOverviewView(ctk.CTkFrame):
         n_all  = len(apps)
         n_daws = sum(1 for a in apps if a.category == CATEGORY_DAW)
         n_lic  = sum(1 for a in apps if a.category == CATEGORY_LICENSE_MANAGER)
-        n_hw   = sum(1 for a in apps if a.category == CATEGORY_HARDWARE_UTILITY)
 
         self._lbl["snap_apps"].configure(text=str(n_all))
         self._lbl["snap_daws"].configure(text=str(n_daws))
         self._lbl["snap_licenses"].configure(text=str(n_lic))
-        self._lbl["snap_hardware"].configure(text=str(n_hw))
 
         self._lbl["mig_apps"].configure(text=str(n_all))
         self._lbl["mig_licenses"].configure(text=str(n_lic))
@@ -1011,12 +1109,15 @@ class StudioOverviewView(ctk.CTkFrame):
             for i, (vendor, size) in enumerate(top5):
                 rf = ctk.CTkFrame(self._vendor_frame, fg_color="transparent")
                 rf.grid(row=i, column=0, sticky="ew", pady=2)
-                rf.grid_columnconfigure(1, weight=1)
+                rf.grid_columnconfigure(0, weight=1)
+                rf.grid_columnconfigure(1, weight=2)
                 color = VENDOR_PALETTE[i % len(VENDOR_PALETTE)]
-                ctk.CTkLabel(
-                    rf, text=vendor[:20], width=120,
+                name_lbl = ctk.CTkLabel(
+                    rf, text=vendor,
                     font=ctk.CTkFont(size=10), text_color=TEXT_PRIMARY, anchor="w",
-                ).grid(row=0, column=0, sticky="w")
+                )
+                name_lbl.grid(row=0, column=0, sticky="ew")
+                _bind_tooltip(name_lbl, vendor)
                 b = ctk.CTkProgressBar(
                     rf, height=4, corner_radius=2,
                     progress_color=color, fg_color=BG_CARD_INNER,
@@ -1024,7 +1125,7 @@ class StudioOverviewView(ctk.CTkFrame):
                 b.set(size / max(max_size, 1))
                 b.grid(row=0, column=1, sticky="ew", padx=(6, 6))
                 ctk.CTkLabel(
-                    rf, text=_fmt_size(size), width=80,
+                    rf, text=_fmt_size(size), width=72,
                     font=ctk.CTkFont(size=10), text_color=TEXT_MUTED, anchor="e",
                 ).grid(row=0, column=2, sticky="e")
 
@@ -1044,22 +1145,24 @@ class StudioOverviewView(ctk.CTkFrame):
         max_size = top5[0][1] if top5 else 1
         for i, (vendor, size) in enumerate(top5):
             rf = ctk.CTkFrame(self._vendor_bars_frame, fg_color="transparent")
-            rf.grid(row=i, column=0, sticky="ew", pady=4)
-            rf.grid_columnconfigure(1, weight=1)
+            rf.grid(row=i, column=0, sticky="ew", pady=3)
+            rf.grid_columnconfigure(0, weight=1)
+            rf.grid_columnconfigure(1, weight=2)
             color = VENDOR_PALETTE[i % len(VENDOR_PALETTE)]
-            ctk.CTkLabel(
-                rf, text=vendor[:22], width=130,
+            name_lbl = ctk.CTkLabel(
+                rf, text=vendor,
                 font=ctk.CTkFont(size=11), text_color=TEXT_PRIMARY, anchor="w",
-            ).grid(row=0, column=0, sticky="w")
+            )
+            name_lbl.grid(row=0, column=0, sticky="ew")
+            _bind_tooltip(name_lbl, vendor)
             b = ctk.CTkProgressBar(
                 rf, height=5, corner_radius=3,
                 progress_color=color, fg_color=BG_CARD_INNER,
             )
             b.set(size / max(max_size, 1))
             b.grid(row=0, column=1, sticky="ew", padx=(8, 8))
-            pct = int(100 * size / max(total_size, 1))
             ctk.CTkLabel(
                 rf, text=f"{_fmt_size(size)}",
                 font=ctk.CTkFont(size=10), text_color=TEXT_MUTED, anchor="e",
-                width=80,
+                width=72,
             ).grid(row=0, column=2, sticky="e")

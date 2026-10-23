@@ -70,13 +70,21 @@ class PluginScannerView(ctk.CTkFrame):
         self,
         parent: ctk.CTkFrame,
         on_plugins_ready: Optional[Callable[[list[Plugin]], None]] = None,
+        on_request_scan: Optional[Callable[[], None]] = None,
+        on_scan_progress: Optional[Callable[[str], None]] = None,
+        on_scan_failed: Optional[Callable[[str], None]] = None,
         db=None,
         last_scanned: Optional[str] = None,
+        scan_paths: list[str] | None = None,
         **kwargs,
     ):
         super().__init__(parent, fg_color="transparent", **kwargs)
+        self._scan_paths = list(scan_paths) if scan_paths else None
 
         self._on_plugins_ready = on_plugins_ready
+        self._on_request_scan = on_request_scan
+        self._on_scan_progress = on_scan_progress
+        self._on_scan_failed = on_scan_failed
         self._all_plugins: list[Plugin] = []
         self._filtered: list[Plugin] = []
         self._iid_to_plugin: dict[str, Plugin] = {}
@@ -142,7 +150,7 @@ class PluginScannerView(ctk.CTkFrame):
             fg_color=ACCENT,
             hover_color=ACCENT_HOVER,
             text_color="#FFFFFF",
-            command=self._start_scan,
+            command=self._request_scan,
         )
         self._scan_btn.grid(row=0, column=0, sticky="w")
 
@@ -330,28 +338,59 @@ class PluginScannerView(ctk.CTkFrame):
 
     # ── Scanning ──────────────────────────────────────────────────────────────
 
-    def _start_scan(self) -> None:
+    def _request_scan(self) -> None:
+        """Toolbar button — delegates to app-level scan when wired."""
+        if self._on_request_scan:
+            self._on_request_scan()
+        else:
+            self.begin_scan()
+
+    def begin_scan(self) -> bool:
+        """Start a full plugin scan. Returns False if a scan is already running."""
         if self._scanning:
-            return
+            return False
         self._scanning = True
         self._scan_btn.configure(state="disabled", text="  ◈  Scanning…")
         self._clear_table()
         self._empty_label.grid_remove()
-        self._status_var.set("Starting scan…")
+        self._status_var.set("Scanning plugins…")
         threading.Thread(target=self._run_scan, daemon=True).start()
+        return True
 
     def _run_scan(self) -> None:
-        result = scan_plugins(progress_cb=self._on_progress)
-        self.after(0, self._on_scan_complete, result)
+        try:
+            result = scan_plugins(
+                paths=self._scan_paths,
+                progress_cb=self._on_progress,
+            )
+            self.after(0, self._on_scan_complete, result, None)
+        except Exception as exc:
+            self.after(0, self._on_scan_complete, None, exc)
 
     def _on_progress(self, msg: str) -> None:
         self.after(0, self._status_var.set, msg)
+        if self._on_scan_progress:
+            self.after(0, self._on_scan_progress, msg)
 
-    def _on_scan_complete(self, result: ScanResult) -> None:
-        self._scan_result = result
-        self._all_plugins = result.plugins
+    def _on_scan_complete(
+        self,
+        result: ScanResult | None,
+        error: Exception | None,
+    ) -> None:
         self._scanning = False
         self._scan_btn.configure(state="normal", text="  ◈  Scan Plugins")
+
+        if error is not None:
+            msg = f"Scan failed: {error}"
+            self._status_var.set(msg)
+            if self._on_scan_failed:
+                self._on_scan_failed(str(error))
+            return
+
+        assert result is not None
+        self._scan_result = result
+        self._all_plugins = result.plugins
+        self._status_var.set("Scan complete")
 
         if self._on_plugins_ready:
             self._on_plugins_ready(self._all_plugins)

@@ -6,7 +6,7 @@ Layout
   Sidebar (CTkFrame, fixed width, fills window height)
   ├── Header  — brand name + collapse toggle  [fixed, never scrolls]
   ├── Nav     — CTkScrollableFrame            [expands, scrollable]
-  │   ├── section headers (DASHBOARD, PLUGIN SUITE, …)
+  │   ├── section headers (DASHBOARD, PLUGIN MANAGEMENT, …)
   │   └── nav items with left-accent indicator
   └── Footer  — logo + version               [fixed, never scrolls]
 
@@ -46,23 +46,27 @@ NAV_SECTIONS: list[tuple[str, list[tuple[str, str, str]]]] = [
     ("DASHBOARD", [
         ("studio_overview", "▣", "Studio Overview"),
     ]),
-    ("PLUGIN SUITE", [
+    ("PLUGIN MANAGEMENT", [
         ("plugins",         "◈", "Plug-in Scanner"),
         ("format_analysis", "⊞", "Format Analysis"),
         ("plugin_health",   "◎", "Plugin Health"),
-        ("quarantine",      "▣", "Quarantined Items"),
         ("cleanup",         "◯", "Cleanup Recommendations"),
+        ("quarantine",      "▣", "Quarantined Items"),
     ]),
-    ("STUDIO TOOLS", [
-        ("music_software",  "♬", "Music Software Scanner"),
-        ("migration",       "⇄", "Migration Assistant"),
-        ("hardware",        "⬢", "Hardware Inventory"),
-        ("midi",            "♩", "MIDI Devices"),
-        ("mapper",          "⋈", "Studio Mapper"),
+    ("STUDIO SYSTEM", [
+        ("music_software",   "♬", "Music Software Scanner"),
+        ("studio_snapshots", "⊟", "Studio Snapshots"),
+        ("migration",        "⇄", "Migration Assistant"),
+    ]),
+    ("HARDWARE & I/O", [
+        ("hardware",      "⬢", "Studio Hardware"),
+        ("audio_devices", "◉", "Audio Devices"),
+        ("midi",          "♩", "MIDI Devices"),
+        ("mapper",        "⋈", "Studio Mapper"),
     ]),
     ("ADMIN", [
-        ("licenses",        "⬡", "License Vault"),
-        ("settings",        "⚙", "Settings"),
+        ("licenses", "⬡", "License Vault"),
+        ("settings", "⚙", "Settings"),
     ]),
 ]
 
@@ -128,27 +132,23 @@ class Sidebar(ctk.CTkFrame):
         hdr.grid(row=row, column=0, sticky="ew")
         hdr.grid_columnconfigure(0, weight=1)
 
-        # Brand text (inside a sub-frame so pack works)
+        # Brand area (logo image or text fallback)
         brand = ctk.CTkFrame(hdr, fg_color="transparent")
         brand.grid(row=0, column=0, sticky="w", padx=20, pady=(24, 0))
 
-        self._brand_title = ctk.CTkLabel(
-            brand,
-            text="BAKKIS",
-            font=ctk.CTkFont(family="SF Pro Display", size=20, weight="bold"),
-            text_color=TEXT_PRIMARY,
-            anchor="w",
-        )
-        self._brand_title.pack(anchor="w")
+        self._brand_logo_label: ctk.CTkLabel | None = None
+        self._brand_logo_image: ctk.CTkImage | None = None
+        self._brand_title_label: ctk.CTkLabel | None = None
+        self._build_brand_logo(brand)
 
         self._brand_sub = ctk.CTkLabel(
             brand,
-            text="STUDIO MANAGER",
+            text="Studio Manager",
             font=ctk.CTkFont(family="SF Pro Display", size=9, weight="bold"),
             text_color=ACCENT,
             anchor="w",
         )
-        self._brand_sub.pack(anchor="w", pady=(1, 0))
+        self._brand_sub.pack(anchor="w", pady=(3, 0))
 
         # Collapse toggle — top-right corner
         self._toggle_btn = ctk.CTkButton(
@@ -169,6 +169,74 @@ class Sidebar(ctk.CTkFrame):
         ctk.CTkFrame(hdr, height=1, fg_color=DIVIDER).grid(
             row=1, column=0, columnspan=2, sticky="ew", padx=16, pady=(16, 0),
         )
+
+    def _build_brand_logo(self, parent: ctk.CTkFrame) -> None:
+        """Load BAKKIS wordmark for the sidebar header. Falls back to styled text."""
+        logo_path = Path(__file__).parent.parent / "assets" / "branding" / "bakkislogo.png"
+        if not logo_path.is_file():
+            logo_path = Path(__file__).parent.parent.parent / "assets" / "bakkislogo.png"
+
+        if logo_path.is_file():
+            photo = self._load_brand_photo(logo_path)
+            if photo is not None:
+                lbl = tk.Label(
+                    parent,
+                    image=photo,
+                    bg=BG_SIDEBAR,
+                    bd=0,
+                    highlightthickness=0,
+                    cursor="",
+                )
+                lbl.pack(anchor="w")
+                self._brand_logo_label = lbl  # type: ignore[assignment]
+                self._brand_photo = photo
+                return
+
+        # Text fallback — styled wordmark matching the visual weight of the logo
+        self._brand_title_label = ctk.CTkLabel(
+            parent,
+            text="BAKKIS",
+            font=ctk.CTkFont(family="SF Pro Display", size=20, weight="bold"),
+            text_color=TEXT_PRIMARY,
+            anchor="w",
+        )
+        self._brand_title_label.pack(anchor="w")
+
+    def _load_brand_photo(self, logo_path: Path) -> tk.PhotoImage | None:
+        """Return a scaled PhotoImage for the header wordmark."""
+        target_h = 32
+
+        # Prefer Pillow when available — sharper resize on Retina displays.
+        try:
+            from PIL import Image, ImageTk
+
+            img = Image.open(logo_path).convert("RGBA")
+            aspect = img.width / img.height
+            target_w = max(1, int(target_h * aspect))
+            try:
+                resample = Image.Resampling.LANCZOS
+            except AttributeError:
+                resample = Image.LANCZOS  # type: ignore[attr-defined]
+            img_display = img.resize((target_w, target_h), resample)
+            return ImageTk.PhotoImage(img_display)
+        except ImportError:
+            pass
+        except Exception:
+            pass
+
+        # No Pillow: Tk can load PNG directly and downscale via subsample().
+        try:
+            photo = tk.PhotoImage(file=str(logo_path))
+            orig_w, orig_h = photo.width(), photo.height()
+            if orig_h <= target_h:
+                return photo
+
+            target_w = max(1, int(target_h * orig_w / orig_h))
+            factor_x = max(1, round(orig_w / target_w))
+            factor_y = max(1, round(orig_h / target_h))
+            return photo.subsample(factor_x, factor_y)
+        except Exception:
+            return None
 
     # ── Scrollable nav ────────────────────────────────────────────────────────
 
@@ -250,52 +318,13 @@ class Sidebar(ctk.CTkFrame):
 
         ctk.CTkFrame(footer, height=1, fg_color=DIVIDER).pack(fill="x", pady=(0, 10))
 
-        self._logo_label: ctk.CTkLabel | None = None
-        self._logo_image: ctk.CTkImage | None = None
-        self._build_logo(footer)
-
         self._version_lbl = ctk.CTkLabel(
             footer,
             text="v1.0.0",
             font=ctk.CTkFont(size=9),
             text_color=TEXT_MUTED,
         )
-        self._version_lbl.pack(pady=(4, 0))
-
-    def _build_logo(self, parent: ctk.CTkFrame) -> None:
-        logo_path = Path(__file__).parent.parent.parent / "assets" / "bakkislogo.png"
-        if logo_path.is_file():
-            try:
-                from PIL import Image
-
-                img = Image.open(logo_path).convert("RGBA")
-                target_h = 28
-                scale = target_h / img.height
-                target_w = max(1, int(img.width * scale))
-                try:
-                    resample = Image.Resampling.LANCZOS
-                except AttributeError:
-                    resample = Image.LANCZOS  # type: ignore[attr-defined]
-                img = img.resize((target_w, target_h), resample)
-                self._logo_image = ctk.CTkImage(
-                    light_image=img, dark_image=img, size=(target_w, target_h),
-                )
-                self._logo_label = ctk.CTkLabel(
-                    parent, image=self._logo_image, text="", fg_color="transparent",
-                )
-                self._logo_label.pack(anchor="center")
-                return
-            except Exception:
-                pass
-
-        # Fallback text logo
-        ctk.CTkLabel(
-            parent,
-            text="BAKKIS",
-            font=ctk.CTkFont(family="SF Pro Display", size=13, weight="bold"),
-            text_color=TEXT_MUTED,
-            fg_color="transparent",
-        ).pack(anchor="center")
+        self._version_lbl.pack(pady=(0, 0))
 
     # ──────────────────────────────────────────────────────────────────────────
     # Collapse / expand
@@ -310,8 +339,11 @@ class Sidebar(ctk.CTkFrame):
 
     def _apply_collapsed(self) -> None:
         self.configure(width=SIDEBAR_COL)
-        # Shrink brand to just the first letter
-        self._brand_title.configure(text="B")
+        # Hide logo/wordmark and subtitle; show a minimal text initial
+        if self._brand_logo_label:
+            self._brand_logo_label.pack_forget()
+        if self._brand_title_label:
+            self._brand_title_label.configure(text="B")
         self._brand_sub.pack_forget()
         for lbl in self._section_labels:
             lbl.grid_remove()
@@ -320,15 +352,17 @@ class Sidebar(ctk.CTkFrame):
         for key, icon, _label in NAV_ITEMS:
             if key in self._buttons:
                 self._buttons[key].configure(text=f" {icon} ", anchor="center")
-        # Hide logo / version in collapsed state
-        if self._logo_label:
-            self._logo_label.pack_forget()
+        # Hide version in collapsed state
         self._version_lbl.pack_forget()
 
     def _apply_expanded(self) -> None:
         self.configure(width=SIDEBAR_W)
-        self._brand_title.configure(text="BAKKIS")
-        self._brand_sub.pack(anchor="w", pady=(1, 0))
+        # Restore logo/wordmark
+        if self._brand_logo_label:
+            self._brand_logo_label.pack(anchor="w")
+        if self._brand_title_label:
+            self._brand_title_label.configure(text="BAKKIS")
+        self._brand_sub.pack(anchor="w", pady=(3, 0))
         for lbl in self._section_labels:
             lbl.grid()
         self._toggle_btn.configure(text="‹")
@@ -338,10 +372,7 @@ class Sidebar(ctk.CTkFrame):
                 self._buttons[key].configure(
                     text=f"  {icon}   {label}", anchor="w",
                 )
-        # Restore footer widgets
-        if self._logo_label:
-            self._logo_label.pack(anchor="center", before=self._version_lbl)
-        self._version_lbl.pack(pady=(4, 0))
+        self._version_lbl.pack(pady=(0, 0))
 
     # ──────────────────────────────────────────────────────────────────────────
     # Navigation state

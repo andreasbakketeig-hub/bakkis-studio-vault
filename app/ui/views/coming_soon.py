@@ -23,13 +23,6 @@ _MODULE_META: dict[str, tuple[str, str, str, str]] = {
         "and activation details — all in one secure place.",
         "#A855F7",
     ),
-    "hardware": (
-        "⬢",
-        "Hardware Inventory",
-        "Track audio interfaces, controllers, synthesisers,\n"
-        "and every other piece of studio hardware you own.",
-        "#F59E0B",
-    ),
     "midi": (
         "♩",
         "MIDI Devices",
