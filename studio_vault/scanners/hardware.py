@@ -349,6 +349,27 @@ def _scan_core_midi() -> tuple[list[HardwareDevice], list[str], list[str]]:
     return devices, errors, status
 
 
+# ── Details for snapshots and checklists ──────────────────────────────────────
+
+def device_details(dev: HardwareDevice) -> str:
+    """'1 in · 2 out · 48 kHz · USB' from the CoreAudio entry, else just the connection."""
+    meta = dev.raw_metadata or {}
+    entries = [meta] + [e for e in meta.get("entries", []) if isinstance(e, dict)]
+    audio = next((e for e in entries if "coreaudio_device_srate" in e or "coreaudio_device_input" in e
+                  or "coreaudio_device_output" in e), {})
+    parts: list[str] = []
+    for key, label in (("coreaudio_device_input", "in"), ("coreaudio_device_output", "out")):
+        value = audio.get(key)
+        if isinstance(value, int) and value > 0:
+            parts.append(f"{value} {label}")
+    rate = audio.get("coreaudio_device_srate")
+    if isinstance(rate, (int, float)) and rate > 0:
+        parts.append(f"{rate / 1000:g} kHz")
+    if dev.connection_type and dev.connection_type not in ("MIDI", "Unknown"):
+        parts.append(dev.connection_type)
+    return " · ".join(parts)
+
+
 # ── Merge & filter ────────────────────────────────────────────────────────────
 
 def _merge_candidates(candidates: list[HardwareDevice]) -> list[HardwareDevice]:

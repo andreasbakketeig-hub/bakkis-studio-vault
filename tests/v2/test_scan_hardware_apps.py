@@ -120,3 +120,24 @@ class TestScanMusicApps:
                                              "CFBundleIdentifier": "com.native-instruments.Maschine 2"})
         [app] = scan_music_apps([str(apps)])
         assert app.developer == "Native Instruments"
+
+
+class TestDeviceDetails:
+    def test_channels_rate_and_connection(self):
+        from studio_vault.scanners.hardware import HardwareDevice, device_details
+        dev = HardwareDevice("Shure MV7", "Shure Inc", "Audio Interface", "USB", "CoreAudio",
+                             raw_metadata={"coreaudio_device_input": 1, "coreaudio_device_output": 2,
+                                           "coreaudio_device_srate": 48000})
+        assert device_details(dev) == "1 in · 2 out · 48 kHz · USB"
+
+    def test_merged_device_and_44_1(self):
+        from studio_vault.scanners.hardware import HardwareDevice, device_details
+        dev = HardwareDevice("BiG SiX", "SSL", "Audio Interface", "USB", "CoreAudio, USB",
+                             raw_metadata={"merged_sources": ["CoreAudio", "USB"],
+                                           "entries": [{"product_id": "0x1"}, {"coreaudio_device_input": 12,
+                                                       "coreaudio_device_output": 12, "coreaudio_device_srate": 44100}]})
+        assert device_details(dev) == "12 in · 12 out · 44.1 kHz · USB"
+
+    def test_midi_device_without_audio(self):
+        from studio_vault.scanners.hardware import HardwareDevice, device_details
+        assert device_details(HardwareDevice("mioXL", "iConnectivity", "MIDI Device", "MIDI", "MIDI")) == ""

@@ -89,6 +89,8 @@ class SnapHardware:
     vendor: str = ""
     device_type: str = ""
     connection_type: str = ""
+    details: str = ""       # "1 in · 2 out · 48 kHz · USB"
+    control_app: str = ""   # hardware utility app from the same vendor found on this Mac
 
 
 @dataclass(frozen=True)
@@ -204,7 +206,11 @@ def from_scan(
     content: Iterable[Any] = (),
 ) -> Snapshot:
     """Build a snapshot from scanner results (scanners.plugins/apps/hardware objects)."""
+    from studio_vault.scanners.hardware import device_details
+    from studio_vault.vendors import control_app
+
     machine = this_machine_name()
+    apps = list(apps)
     return Snapshot(
         id=uuid.uuid4().hex,
         name=name.strip() or machine,
@@ -234,6 +240,8 @@ def from_scan(
             (SnapHardware(
                 name=h.name, vendor=h.vendor, device_type=h.device_type,
                 connection_type=h.connection_type,
+                details=device_details(h) if hasattr(h, "raw_metadata") else getattr(h, "details", ""),
+                control_app=control_app(h.vendor, apps),
             ) for h in hardware),
             key=lambda h: h.name.lower(),
         ),
@@ -277,6 +285,7 @@ def _hardware(d: dict) -> SnapHardware:
     return SnapHardware(
         name=_s(d, "name"), vendor=_s(d, "vendor"),
         device_type=_s(d, "device_type"), connection_type=_s(d, "connection_type"),
+        details=_s(d, "details"), control_app=_s(d, "control_app"),
     )
 
 

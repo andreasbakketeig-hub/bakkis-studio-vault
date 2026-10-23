@@ -59,6 +59,7 @@ class ChecklistItem:
     vendor: str = ""              # hardware only
     warnings: list[str] = field(default_factory=list)   # e.g. Intel-only on an Apple Silicon Mac
     size: int = 0                 # content folders: bytes on the old Mac
+    details: str = ""             # hardware: channels, sample rate, connection
     download_url: str = ""        # hardware only: vendor driver page when known
     status: str = STATUS_MISSING  # automatic, from the current scan
     manual_done: bool = False
@@ -207,12 +208,17 @@ def build(source: Snapshot, current: Snapshot, manual_done: set[str] | None = No
     # Hardware: "connected and working on this Mac" means it shows up in the current scan.
     current_hw = {re.sub(r"[^a-z0-9]+", "", h.name.lower()) for h in current.hardware}
     hardware: list[ChecklistItem] = []
+    current_app_names = {a.name.lower() for a in current.apps}
     for h in source.hardware:
         item_id = _item_id(KIND_HARDWARE, h.name)
         hw_vendor = match_vendor(h.vendor)
+        notes = []
+        if h.control_app and h.control_app.lower() not in current_app_names:
+            notes.append(f"Install {h.control_app} to set it up.")
         hardware.append(ChecklistItem(
             id=item_id, kind=KIND_HARDWARE, name=h.name, category=h.device_type,
             vendor=h.vendor, download_url=hw_vendor.download_url if hw_vendor else "",
+            details=h.details, warnings=notes,
             status=STATUS_INSTALLED if item_id.split(":", 1)[1] in current_hw else STATUS_MISSING,
             manual_done=item_id in manual,
         ))

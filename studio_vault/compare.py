@@ -252,7 +252,7 @@ def side_by_side(a: Snapshot, b: Snapshot) -> SideBySide:
     for key in ha.keys() | hb.keys():
         ref = ha.get(key) or hb.get(key)
         status = SAME if key in ha and key in hb else (ONLY_A if key in ha else ONLY_B)
-        result.hardware.append(SideRow("hardware", ref.name, status, note=ref.vendor))
+        result.hardware.append(SideRow("hardware", ref.name, status, note=ref.details or ref.vendor))
 
     order = {ONLY_A: 0, ONLY_B: 1, DIFFERENT: 2, SAME: 3}
     for g in groups.values():

@@ -67,7 +67,7 @@ Then open the app again.
 4. Open **New Mac**. Everything from the old Mac is listed per vendor with what to do: *Open Native Access, sign in and install the missing items*, *Activate in iLok License Manager*, and so on.
 5. Install things in any order and press **Scan now** now and then. Items tick themselves off when the scan finds them; tick the rest by hand. **Print or export…** gives you the checklist as a web page or a spreadsheet.
 
-Hardware is on the list too: connect each device and install its driver; it ticks off once the Mac sees it.
+Hardware is on the list too, with its channels and sample rate: connect each device and install its driver or control app (SSL 360, Focusrite Control, MOTIV …, when one was found on the old Mac); it ticks off once the Mac sees it.
 
 ---
 

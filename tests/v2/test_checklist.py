@@ -159,3 +159,15 @@ def test_no_warnings_on_intel_target_or_unknown():
     intel = _snap(id="new"); intel.cpu = "x86_64"
     assert _item(cl.build(old, intel, set()), "Absynth 5").warnings == []
     assert _item(cl.build(old, _snap(id="x"), set()), "Absynth 5").warnings == []
+
+
+def test_hardware_details_and_control_app_reminder():
+    old = _snap(apps=[SnapApp("SSL 360", "Hardware Utility", "Solid State Logic")],
+                hardware=[SnapHardware("BiG SiX", "Solid State Logic", "Audio Interface", "USB",
+                                       details="12 in · 12 out · 48 kHz · USB", control_app="SSL 360")])
+    c = cl.build(old, _snap(id="new"), manual_done=set())
+    big = _item(c, "BiG SiX")
+    assert big.details == "12 in · 12 out · 48 kHz · USB"
+    assert big.warnings == ["Install SSL 360 to set it up."]
+    new = _snap(id="new", apps=[SnapApp("SSL 360")])
+    assert _item(cl.build(old, new, set()), "BiG SiX").warnings == []

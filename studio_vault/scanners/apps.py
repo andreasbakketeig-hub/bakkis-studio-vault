@@ -176,6 +176,7 @@ KNOWN_APPS: list[tuple[str, str, str]] = [
     ("PreSonus Universal Control", CATEGORY_HARDWARE_UTILITY, "PreSonus"),
     ("Universal Control",       CATEGORY_HARDWARE_UTILITY, "PreSonus"),
     ("SSL 360",                 CATEGORY_HARDWARE_UTILITY, "Solid State Logic"),
+    ("MOTIV",                   CATEGORY_HARDWARE_UTILITY, "Shure"),
     ("Apogee Control",          CATEGORY_HARDWARE_UTILITY, "Apogee Electronics"),
     ("Ableton Push",            CATEGORY_HARDWARE_UTILITY, "Ableton"),
     ("iConnectivity",           CATEGORY_HARDWARE_UTILITY, "iConnectivity"),

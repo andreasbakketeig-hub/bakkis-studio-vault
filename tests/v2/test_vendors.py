@@ -74,3 +74,15 @@ def test_installed_manager():
     assert installed_manager(vendor_by_key("izotope"), apps) == "Native Access 2"
     assert installed_manager(vendor_by_key("waves"), apps) == ""
     assert installed_manager(vendor_by_key("fabfilter"), apps) == ""
+
+
+def test_control_app_for_hardware():
+    from types import SimpleNamespace as NS
+    from studio_vault.vendors import control_app
+    apps = [NS(name="SSL 360", category="Hardware Utility", developer="Solid State Logic"),
+            NS(name="MOTIV Mix", category="Hardware Utility", developer="Shure"),
+            NS(name="Logic Pro", category="DAW", developer="Apple")]
+    assert control_app("Solid State Logic", apps) == "SSL 360"
+    assert control_app("Shure Inc", apps) == "MOTIV Mix"
+    assert control_app("Apple Inc.", apps) == ""          # not a hardware utility
+    assert control_app("", apps) == ""

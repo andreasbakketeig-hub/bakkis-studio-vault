@@ -81,7 +81,7 @@ def inventory_csv(snapshot: Snapshot, dest: Path) -> Path:
     for a in snapshot.apps:
         rows.append(["App", a.name, a.developer, a.version, a.category, "", a.path])
     for h in snapshot.hardware:
-        rows.append(["Hardware", h.name, h.vendor, "", h.device_type, "", h.connection_type])
+        rows.append(["Hardware", h.name, h.vendor, "", h.device_type, "", h.details or h.connection_type])
     return _write_csv(dest, ["Type", "Name", "Vendor", "Version", "Format / category",
                              "Size (bytes)", "Path / connection"], rows)
 

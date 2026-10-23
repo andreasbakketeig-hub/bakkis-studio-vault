@@ -197,6 +197,19 @@ def vendor_by_key(key: str) -> Vendor | None:
     return _BY_KEY.get(key)
 
 
+def control_app(hardware_vendor: str, apps: Iterable) -> str:
+    """Name of a hardware utility app (SSL 360, Focusrite Control …) from the same vendor, or ""."""
+    if not hardware_vendor:
+        return ""
+    want = vendor_group(hardware_vendor)[0]
+    if want == OTHER_GROUP_KEY:
+        return ""
+    for app in apps:
+        if getattr(app, "category", "") == "Hardware Utility" and vendor_group(getattr(app, "developer", ""))[0] == want:
+            return app.name
+    return ""
+
+
 def installed_manager(vendor: Vendor, apps: Iterable[NamedApp]) -> str:
     """Name of the installed manager app for *vendor*, or "" when not installed."""
     if not vendor.manager_hints:

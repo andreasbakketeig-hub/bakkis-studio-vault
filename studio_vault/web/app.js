@@ -485,7 +485,7 @@ function renderCompare() {
     return el("div", { class: "cmp-row" },
       el("span", {}, r.name, r.category === "apps" ? el("span", { class: "muted" }, " · app") : null),
       a, b, el("span", { class: `st ${r.status}` }, label[r.status]),
-      r.note && r.category !== "hardware" ? el("span", { class: "note" }, r.note) : null);
+      r.note ? el("span", { class: "note" }, r.note) : null);
   }
   function renderRows() {
     const q = c.q.trim().toLowerCase();
@@ -663,7 +663,7 @@ function itemRow(i) {
   const auto = i.status === "installed";
   const id = `it-${i.id}`;
   const detail = i.kind === "plugin" ? i.formats.join(" · ") : i.kind === "app" ? "app"
-    : i.kind === "content" ? `${i.category} · ${fmtBytes(i.size)}` : [i.vendor, i.category].filter(Boolean).join(" · ");
+    : i.kind === "content" ? `${i.category} · ${fmtBytes(i.size)}` : [i.vendor, i.category, i.details].filter(Boolean).join(" · ");
   return el("div", { class: "item" },
     el("input", { type: "checkbox", id, checked: i.done, disabled: auto,
                   title: auto ? "Found on this Mac" : "Tick when done", onchange: (e) => tick(i.id, e.target.checked) }),
@@ -962,9 +962,10 @@ function renderInventory() {
         actions(a.path));
     } else {
       rows = d.hardware.filter((h) => !q || h.name.toLowerCase().includes(q) || (h.vendor || "").toLowerCase().includes(q));
-      header = [sortHeader("name", "Device"), sortHeader("vendor", "Vendor"), sortHeader("device_type", "Type"), el("th", {}, "Connection")];
+      header = [sortHeader("name", "Device"), sortHeader("vendor", "Vendor"), sortHeader("device_type", "Type"), el("th", {}, "Details"), el("th", {}, "Control app")];
       row = (h) => el("tr", {}, el("td", {}, h.name), el("td", { class: "soft" }, h.vendor || "—"),
-        el("td", { class: "soft" }, h.device_type || "—"), el("td", { class: "soft" }, h.connection_type || "—"));
+        el("td", { class: "soft" }, h.device_type || "—"), el("td", { class: "soft" }, h.details || h.connection_type || "—"),
+        el("td", { class: "soft" }, h.control_app || "—"));
     }
     const k = inv.sort;
     rows = [...rows].sort((a, b) => {
