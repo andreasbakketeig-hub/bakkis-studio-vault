@@ -1,10 +1,12 @@
-"""Draw the app icon (a vault door dial over stacked snapshot cards) and build the macOS .icns.
+"""Draw the app icon (a vault card on a stack of snapshots) and build the macOS .icns.
 
     python tools/make_icon.py
 
 Writes assets/icon/icon-1024.png and assets/icon/AppIcon.icns (needs macOS `iconutil`).
-Follows Apple's icon grid: an 824 px rounded body on a 1024 px canvas, with a soft shadow.
-Same look as BAKKIS MUSIC SORTER's icon: dark gradient body, light card, teal accent.
+Same family as BAKKIS MUSIC SORTER's icon: dark gradient body on Apple's icon grid
+(824 px rounded body on a 1024 px canvas, soft shadow), a light card tilted 9° with a
+teal glow, a translucent card behind it, teal as the one accent. Here the card is a
+vault door (dial and handle) and two cards behind it stand for snapshots over time.
 """
 
 from __future__ import annotations
@@ -25,8 +27,8 @@ BODY = S * 824 // 1024
 OFF = (S - BODY) // 2
 RADIUS = int(BODY * 0.225)
 TEAL = (0, 214, 180)
-CARD = (242, 243, 245)
-STEEL = (150, 155, 163)
+GRAY = (150, 155, 163)
+DARK = (28, 31, 36)
 
 
 def vertical_gradient(top: tuple, bottom: tuple) -> Image.Image:
@@ -37,50 +39,61 @@ def vertical_gradient(top: tuple, bottom: tuple) -> Image.Image:
     return col.resize((S, S)).convert("RGBA")
 
 
-def draw() -> Image.Image:
-    art = vertical_gradient((28, 31, 36), (9, 10, 12))
-    d = ImageDraw.Draw(art)
-    cx, cy = S // 2 - int(S * 0.04), S // 2 + int(S * 0.04)
+def rounded(w: int, h: int, fill: tuple) -> Image.Image:
+    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    ImageDraw.Draw(img).rounded_rectangle([0, 0, w - 1, h - 1], int(h * 0.12), fill=fill)
+    return img
 
-    # Two snapshot cards peeking out behind the door: the studio over time.
-    cw, ch = int(BODY * 0.70), int(BODY * 0.70)
-    for i, shade in enumerate(((40, 44, 50), (58, 63, 70))):
-        dx = int(S * 0.045) * (2 - i)
-        box = [cx - cw // 2 + dx, cy - ch // 2 - dx, cx + cw // 2 + dx, cy + ch // 2 - dx]
-        d.rounded_rectangle(box, int(cw * 0.12), fill=shade)
 
-    # The door: a light card with a dial.
-    door = [cx - cw // 2, cy - ch // 2, cx + cw // 2, cy + ch // 2]
-    d.rounded_rectangle(door, int(cw * 0.12), fill=CARD)
+def vault_card(cw: int, ch: int) -> Image.Image:
+    card = rounded(cw, ch, (242, 243, 245, 255))
+    d = ImageDraw.Draw(card)
+    cx, cy = int(cw * 0.42), ch // 2
+    r = int(ch * 0.34)
 
-    r_outer = int(cw * 0.34)
-    r_inner = int(cw * 0.13)
-    # Teal glow behind the dial
-    glow = Image.new("RGBA", (S, S), (0, 0, 0, 0))
-    ImageDraw.Draw(glow).ellipse([cx - r_outer, cy - r_outer, cx + r_outer, cy + r_outer], fill=TEAL + (150,))
-    art = Image.alpha_composite(art, glow.filter(ImageFilter.GaussianBlur(S * 0.02)))
-    d = ImageDraw.Draw(art)
-    d.ellipse([cx - r_outer, cy - r_outer, cx + r_outer, cy + r_outer], fill=(22, 24, 28))
-    # Tick marks around the dial
+    # Dial: dark face, tick marks (teal at the quarters), teal handle with three spokes
+    d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=DARK)
     for k in range(24):
         a = 2 * math.pi * k / 24
-        long = k % 6 == 0
-        r1 = r_outer * (0.72 if long else 0.80)
-        r2 = r_outer * 0.90
+        major = k % 6 == 0
+        r1, r2 = r * (0.70 if major else 0.78), r * 0.88
         d.line([(cx + r1 * math.cos(a), cy + r1 * math.sin(a)), (cx + r2 * math.cos(a), cy + r2 * math.sin(a))],
-               fill=TEAL if long else STEEL, width=int(S * (0.012 if long else 0.007)))
-    # Handle spokes and hub
+               fill=TEAL if major else GRAY, width=int(r * (0.07 if major else 0.04)))
     for k in range(3):
         a = 2 * math.pi * k / 3 - math.pi / 2
-        d.line([(cx, cy), (cx + r_outer * 0.62 * math.cos(a), cy + r_outer * 0.62 * math.sin(a))],
-               fill=TEAL, width=int(S * 0.028))
-    d.ellipse([cx - r_inner, cy - r_inner, cx + r_inner, cy + r_inner], fill=TEAL)
-    d.ellipse([cx - r_inner // 2, cy - r_inner // 2, cx + r_inner // 2, cy + r_inner // 2], fill=(22, 24, 28))
-    # Hinges
-    hx = door[0] + int(cw * 0.04)
-    for hy in (cy - int(ch * 0.28), cy + int(ch * 0.28)):
-        d.rounded_rectangle([hx - int(S * 0.012), hy - int(S * 0.04), hx + int(S * 0.012), hy + int(S * 0.04)],
-                            int(S * 0.01), fill=STEEL)
+        d.line([(cx, cy), (cx + r * 0.55 * math.cos(a), cy + r * 0.55 * math.sin(a))], fill=TEAL, width=int(r * 0.15))
+    hub = int(r * 0.22)
+    d.ellipse([cx - hub, cy - hub, cx + hub, cy + hub], fill=TEAL)
+    d.ellipse([cx - hub // 2, cy - hub // 2, cx + hub // 2, cy + hub // 2], fill=DARK)
+
+    # Door handle and hinges, gray like the unplayed waveform on the Sorter card
+    hx = int(cw * 0.80)
+    d.rounded_rectangle([hx, cy - int(ch * 0.20), hx + int(cw * 0.05), cy + int(ch * 0.20)], int(cw * 0.025), fill=GRAY)
+    for hy in (int(ch * 0.22), int(ch * 0.78)):
+        d.rounded_rectangle([int(cw * 0.04), hy - int(ch * 0.06), int(cw * 0.075), hy + int(ch * 0.06)],
+                            int(cw * 0.015), fill=GRAY)
+    return card
+
+
+def draw() -> Image.Image:
+    art = vertical_gradient((28, 31, 36), (9, 10, 12))
+    cw, ch = int(BODY * 0.66), int(BODY * 0.46)
+
+    # Earlier snapshots, left behind
+    for angle, dx, dy, alpha in ((-8, -0.05, 0.27, 150), (-4, -0.025, 0.30, 255)):
+        ghost = rounded(cw, ch, (46, 50, 56, alpha)).rotate(angle, resample=Image.BICUBIC, expand=True)
+        art.alpha_composite(ghost, ((S - ghost.width) // 2 + int(S * dx), int(S * dy)))
+
+    # The vault, tilted like the Sorter's track card
+    card = vault_card(cw, ch).rotate(9, resample=Image.BICUBIC, expand=True)
+    pos = ((S - card.width) // 2 + int(S * 0.06), int(S * 0.26))
+
+    glow_mask = Image.new("L", (S, S), 0)
+    glow_mask.paste(card.getchannel("A"), pos)
+    glow = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+    glow.paste(TEAL + (120,), (0, 0), glow_mask.filter(ImageFilter.GaussianBlur(S * 0.03)))
+    art = Image.alpha_composite(art, glow)
+    art.alpha_composite(card, pos)
 
     # Clip to the rounded body and add the shadow
     body = Image.new("L", (S, S), 0)
