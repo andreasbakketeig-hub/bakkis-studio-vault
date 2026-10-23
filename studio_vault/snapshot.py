@@ -70,6 +70,8 @@ class SnapPlugin:
     modified: str = ""
     path: str = ""
     kind: str = ""          # Instrument | Effect | MIDI | ""
+    arch: str = ""          # universal | arm64 | intel | ""
+    min_macos: str = ""
 
 
 @dataclass(frozen=True)
@@ -98,6 +100,7 @@ class Snapshot:
     created_at: str
     app_version: str = __version__
     macos_version: str = ""
+    cpu: str = ""           # this Mac's CPU: arm64 | x86_64
     source: str = SOURCE_SCAN
     plugins: list[SnapPlugin] = field(default_factory=list)
     apps: list[SnapApp] = field(default_factory=list)
@@ -197,12 +200,14 @@ def from_scan(
         machine_id=this_machine_id(),
         created_at=_now(),
         macos_version=platform.mac_ver()[0],
+        cpu=platform.machine(),
         source=SOURCE_SCAN,
         plugins=sorted(
             (SnapPlugin(
                 name=p.name, fmt=p.fmt, developer=p.developer, version=p.version,
                 bundle_id=getattr(p, "bundle_id", ""), size=p.file_size,
                 modified=p.modified, path=scrub_path(p.path), kind=getattr(p, "kind", ""),
+                arch=getattr(p, "arch", ""), min_macos=getattr(p, "min_macos", ""),
             ) for p in plugins),
             key=lambda p: (p.name.lower(), p.fmt),
         ),
@@ -244,7 +249,7 @@ def _plugin(d: dict) -> SnapPlugin:
         name=_s(d, "name"), fmt=_s(d, "fmt"), developer=_s(d, "developer"),
         version=_s(d, "version"), bundle_id=_s(d, "bundle_id"),
         size=_i(d, "size") or _i(d, "file_size"), modified=_s(d, "modified"),
-        path=scrub_path(_s(d, "path")), kind=_s(d, "kind"),
+        path=scrub_path(_s(d, "path")), kind=_s(d, "kind"), arch=_s(d, "arch"), min_macos=_s(d, "min_macos"),
     )
 
 
@@ -286,6 +291,7 @@ def parse(data: Any) -> Snapshot:
             created_at=_s(data, "created_at"),
             app_version=_s(data, "app_version"),
             macos_version=_s(data, "macos_version"),
+            cpu=_s(data, "cpu"),
             source=_s(data, "source") or SOURCE_SCAN,
             plugins=[_plugin(p) for p in _dicts(data.get("plugins"))],
             apps=[_app(a) for a in _dicts(data.get("apps"))],

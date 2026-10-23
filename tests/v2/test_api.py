@@ -374,3 +374,19 @@ def test_side_by_side_api(vault, scanners):
     assert res["a"]["id"] == sid
     json.dumps(res)
     assert vault.side_by_side("nope", "current")["ok"] is False
+
+
+def test_intel_only_products_and_summary(vault, scanners):
+    scanners["plugins"] = [
+        Plugin("Absynth 5", "VST", "/Library/a.vst", "5.3", "Native Instruments", arch="intel"),
+        Plugin("Absynth 5", "AU", "/Library/a.component", "5.3", "Native Instruments", arch="intel"),
+        Plugin("Mixed", "VST3", "/Library/m.vst3", "1", "Acme", arch="universal", min_macos="11.0"),
+        Plugin("Mixed", "VST", "/Library/m.vst", "1", "Acme", arch="intel", min_macos="10.13"),
+    ]
+    run_scan(vault)
+    products = {p["name"]: p for p in vault.inventory("current")["products"]}
+    assert products["Absynth 5"]["arch"] == "intel"
+    assert products["Mixed"]["arch"] == "mixed" and products["Mixed"]["intel_formats"] == ["VST"]
+    assert products["Mixed"]["min_macos"] == "11.0"
+    cur = vault.state()["current"]
+    assert cur["intel_files"] == 3 and cur["intel_products"] == 2

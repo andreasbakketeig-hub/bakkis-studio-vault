@@ -162,6 +162,10 @@ select.select { background: var(--bg); border: 1px solid var(--line-strong); bor
 .item .name { flex: 1; min-width: 0; }
 .st { font-size: var(--fs-s); font-weight: 600; white-space: nowrap; }
 .st.ok { color: var(--ok); } .st.part { color: var(--warn); } .st.miss { color: var(--danger); } .st.tick { color: var(--soft); }
+.warn-note { display: block; color: var(--warn); font-size: var(--fs-s); margin-top: 2px; }
+.notice { display: flex; gap: 16px; align-items: center; margin-top: 24px; border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); }
+.notice > svg { width: 24px; height: 24px; color: var(--warn); flex: none; }
+.intel-tag { margin-left: 8px; font-size: var(--fs-s); color: var(--warn); border: 1px solid color-mix(in srgb, var(--warn) 50%, transparent); border-radius: 999px; padding: 0 8px; white-space: nowrap; }
 .done-line { margin: 8px 0 0; color: var(--muted); font-size: var(--fs-s); }
 .done-count { color: var(--ok); font-weight: 600; font-size: var(--fs-s); }
 .done-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 0 24px; margin-top: 8px; }

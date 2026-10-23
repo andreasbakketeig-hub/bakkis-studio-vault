@@ -27,10 +27,10 @@ from typing import Any, Callable, Protocol
 
 from studio_vault import APP_NAME, __version__, checklist, config, report
 from studio_vault import snapshot as snap
-from studio_vault.compare import compare, side_by_side
+from studio_vault.compare import compare, compare_versions, side_by_side
 from studio_vault.scanners.apps import scan_music_apps
 from studio_vault.scanners.hardware import scan_hardware
-from studio_vault.scanners.plugins import FORMAT_ORDER, SCAN_PATHS, SizeCache, normalize_product_name, scan_plugins
+from studio_vault.scanners.plugins import ARCH_INTEL, FORMAT_ORDER, SCAN_PATHS, SizeCache, normalize_product_name, scan_plugins
 from studio_vault.vendors import match_vendor
 
 SCAN_IDLE = "idle"
@@ -263,7 +263,7 @@ class Api:
         for p in s.plugins:
             g = groups.setdefault(normalize_product_name(p.name), {
                 "name": p.name, "developer": "", "bundle_id": "", "version": "", "kind": "",
-                "formats": [], "size": 0, "path": "",
+                "formats": [], "size": 0, "path": "", "intel_formats": [], "min_macos": "",
             })
             if p.fmt not in g["formats"]:
                 g["formats"].append(p.fmt)
@@ -271,6 +271,10 @@ class Api:
             if _format_rank(p.fmt) < _format_rank(g.get("_path_fmt", "")):
                 g["path"], g["_path_fmt"] = p.path, p.fmt
             g["size"] += p.size
+            if p.arch == ARCH_INTEL:
+                g["intel_formats"].append(p.fmt)
+            if p.min_macos and (not g["min_macos"] or compare_versions(g["min_macos"], p.min_macos) == 1):
+                g["min_macos"] = p.min_macos
             for key in ("developer", "bundle_id", "version", "kind"):
                 g[key] = g[key] or getattr(p, key)
         out = []
@@ -280,6 +284,10 @@ class Api:
             g["vendor_url"] = vendor.download_url if vendor else ""
             g["matched"] = vendor is not None
             g["formats"].sort(key=_format_rank)
+            g["intel_formats"].sort(key=_format_rank)
+            # intel: every copy is Intel-only; mixed: some formats are.
+            g["arch"] = ("intel" if g["intel_formats"] and len(g["intel_formats"]) == len(g["formats"])
+                         else "mixed" if g["intel_formats"] else "")
             del g["bundle_id"]
             g.pop("_path_fmt", None)
             out.append(g)
@@ -297,6 +305,9 @@ class Api:
             "plugin_formats": s.plugin_formats,
             "plugin_bytes": sum(p.size for p in s.plugins),
             "app_names": [a.name for a in s.apps[:3]],
+            "cpu": s.cpu,
+            "intel_files": sum(1 for p in s.plugins if p.arch == ARCH_INTEL),
+            "intel_products": sum(1 for p in products if p["arch"]),
             "hardware_names": [h.name for h in s.hardware[:3]],
         }
 

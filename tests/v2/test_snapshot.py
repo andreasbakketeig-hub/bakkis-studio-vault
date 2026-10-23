@@ -131,6 +131,8 @@ class TestFromScan:
 class TestParse:
     def test_v2_round_trip(self):
         s = _scan_snapshot()
+        s.plugins[0] = type(s.plugins[0])(**{**s.plugins[0].__dict__, "arch": "intel", "min_macos": "10.13"})
+        s.cpu = "arm64"
         again = snap.parse(json.loads(json.dumps(s.to_dict())))
         assert again == s
 

@@ -20,7 +20,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from studio_vault import config
-from studio_vault.scanners.plugins import FORMAT_ORDER, normalize_product_name
+from studio_vault.compare import compare_versions
+from studio_vault.scanners.plugins import ARCH_INTEL, FORMAT_ORDER, normalize_product_name
 from studio_vault.snapshot import Snapshot
 from studio_vault.vendors import (
     LICENSE_ACCOUNT,
@@ -55,6 +56,7 @@ class ChecklistItem:
     missing_formats: list[str] = field(default_factory=list)  # plug-ins: formats not back yet
     category: str = ""            # apps: DAW, Plugin Manager … / hardware: device type
     vendor: str = ""              # hardware only
+    warnings: list[str] = field(default_factory=list)   # e.g. Intel-only on an Apple Silicon Mac
     download_url: str = ""        # hardware only: vendor driver page when known
     status: str = STATUS_MISSING  # automatic, from the current scan
     manual_done: bool = False
@@ -186,6 +188,7 @@ def build(source: Snapshot, current: Snapshot, manual_done: set[str] | None = No
             version=next((c.version for c in copies if c.version), ""),
             formats=_ordered_formats(formats), missing_formats=_ordered_formats(missing),
             status=status, manual_done=item_id in manual,
+            warnings=compatibility_warnings(copies, current) if status != STATUS_INSTALLED else [],
         ))
 
     # Apps.
@@ -220,6 +223,20 @@ def build(source: Snapshot, current: Snapshot, manual_done: set[str] | None = No
         source_id=source.id, source_name=source.name, source_created_at=source.created_at,
         groups=ordered, hardware=hardware,
     )
+
+
+def compatibility_warnings(copies: list, target: Snapshot) -> list[str]:
+    """What may stop a plug-in from the old Mac working on *target* (read offline from the files)."""
+    warnings: list[str] = []
+    archs = {c.arch for c in copies if c.arch}
+    if target.cpu == "arm64" and archs and archs <= {ARCH_INTEL}:
+        warnings.append("Intel-only on the old Mac: get the Apple Silicon version "
+                        "(the Intel one only loads in a DAW running under Rosetta).")
+    needed = max((c.min_macos for c in copies if c.min_macos),
+                 key=lambda v: tuple(int(x) for x in v.split(".") if x.isdigit()), default="")
+    if needed and target.macos_version and compare_versions(target.macos_version, needed) == 1:
+        warnings.append(f"The old version needs macOS {needed}; this Mac has {target.macos_version}.")
+    return warnings
 
 
 # ── Manual tick state ─────────────────────────────────────────────────────────

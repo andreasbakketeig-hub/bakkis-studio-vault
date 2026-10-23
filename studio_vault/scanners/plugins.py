@@ -13,6 +13,7 @@ import json
 import os
 import plistlib
 import re
+import struct
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Protocol
@@ -28,6 +29,10 @@ PLUGIN_FORMATS: dict[str, str] = {
 }
 
 FORMAT_ORDER: list[str] = ["VST3", "AU", "CLAP", "VST", "AAX"]
+
+ARCH_UNIVERSAL = "universal"
+ARCH_ARM = "arm64"
+ARCH_INTEL = "intel"
 
 KIND_INSTRUMENT = "Instrument"
 KIND_EFFECT = "Effect"
@@ -62,6 +67,8 @@ class Plugin:
     file_size: int = 0        # bytes
     modified: str = ""        # ISO date string YYYY-MM-DD
     kind: str = ""            # KIND_INSTRUMENT | KIND_EFFECT | KIND_MIDI | "" (unknown)
+    arch: str = ""            # ARCH_UNIVERSAL | ARCH_ARM | ARCH_INTEL | "" (unknown)
+    min_macos: str = ""       # LSMinimumSystemVersion, e.g. "10.13"
 
 
 @dataclass
@@ -242,7 +249,7 @@ def _read_plugin(bundle: Path, cache: SizeCache) -> Plugin:
 
 def bundle_metadata(bundle: Path) -> dict:
     """Extract version, developer, bundle_id and modified date from a bundle."""
-    meta: dict = {"version": "", "developer": "", "bundle_id": "", "modified": "", "kind": ""}
+    meta: dict = {"version": "", "developer": "", "bundle_id": "", "modified": "", "kind": "", "arch": "", "min_macos": ""}
 
     try:
         meta["modified"] = datetime.datetime.fromtimestamp(
@@ -266,7 +273,48 @@ def bundle_metadata(bundle: Path) -> dict:
     meta["bundle_id"] = str(plist.get("CFBundleIdentifier") or "").strip()
     meta["developer"] = _developer_from_plist(plist)
     meta["kind"] = _kind_from_plist(plist) or _kind_from_vst3_moduleinfo(bundle)
+    meta["min_macos"] = str(plist.get("LSMinimumSystemVersion") or "").strip()
+    executable = str(plist.get("CFBundleExecutable") or "").strip()
+    if executable and "/" not in executable:
+        meta["arch"] = binary_arch(bundle / "Contents" / "MacOS" / executable)
     return meta
+
+
+# Mach-O CPU types (mach/machine.h)
+_CPU_X86_64 = 0x01000007
+_CPU_ARM64 = 0x0100000C
+
+
+def binary_arch(path: Path) -> str:
+    """ARCH_* for a Mach-O binary, read from its header only (the binary is never loaded)."""
+    try:
+        with path.open("rb") as fh:
+            head = fh.read(8 + 32 * 8)
+    except OSError:
+        return ""
+    if len(head) < 8:
+        return ""
+    magic = struct.unpack(">I", head[:4])[0]
+    cpus: set[int] = set()
+    if magic in (0xCAFEBABE, 0xCAFEBABF):          # fat / universal (big-endian header)
+        count = struct.unpack(">I", head[4:8])[0]
+        step = 20 if magic == 0xCAFEBABE else 32
+        for i in range(min(count, 8)):
+            off = 8 + i * step
+            if off + 4 <= len(head):
+                cpus.add(struct.unpack(">i", head[off:off + 4])[0])
+    elif magic in (0xCFFAEDFE, 0xCEFAEDFE):        # thin, little-endian
+        cpus.add(struct.unpack("<i", head[4:8])[0])
+    else:
+        return ""
+    arm, intel = _CPU_ARM64 in cpus, _CPU_X86_64 in cpus
+    if arm and intel:
+        return ARCH_UNIVERSAL
+    if arm:
+        return ARCH_ARM
+    if intel:
+        return ARCH_INTEL
+    return ""
 
 
 def _kind_from_plist(plist: dict) -> str:

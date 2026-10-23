@@ -10,6 +10,7 @@ Made by [BAKKIS](https://bakkis.com), DJ and producer from Norway.
 - Shows what changed since your last snapshot: new plug-ins, updates and anything that disappeared
 - New Mac checklist grouped by vendor, with the installer app (Native Access, Waves Central, UA Connect …), the license system (account, iLok, serial) and a download link
 - Compare two Macs side by side, for example your studio Mac and your touring laptop: what each one lacks, per vendor
+- Flags Intel-only plug-ins (they only load under Rosetta on Apple Silicon) and plug-ins that need a newer macOS, read straight from the files, no online database
 - **Read-only**: it never moves, changes or deletes a plug-in, and nothing leaves your Mac
 
 ---
@@ -83,7 +84,7 @@ Press **⌘1–⌘5** to switch screens. Settings (the gear icon) has scanning o
 ### What it reads
 
 - Plug-ins in the standard macOS folders (`/Library/Audio/Plug-Ins/…`, `~/Library/Audio/Plug-Ins/…`, Avid's AAX folder) plus any extra folders you add in Settings.
-- Version, vendor and type from each plug-in's `Info.plist` and VST3 `moduleinfo.json`. Plug-ins are never loaded or run.
+- Version, vendor, type and minimum macOS from each plug-in's `Info.plist` and VST3 `moduleinfo.json`, and the processor (Apple Silicon, Intel or both) from the header of its binary. Plug-ins are never loaded or run.
 - Music apps in `/Applications` and `~/Applications`.
 - Audio, MIDI and USB devices through macOS `system_profiler` and Core MIDI.
 

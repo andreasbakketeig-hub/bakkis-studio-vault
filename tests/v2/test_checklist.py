@@ -127,3 +127,23 @@ def test_corrupt_state_file_is_ignored():
     assert cl.load_state("old") == set()
     path.write_text('{"done": ["plugin:serum", 5]}')
     assert cl.load_state("old") == {"plugin:serum"}
+
+
+def test_compatibility_warnings_for_new_apple_silicon_mac():
+    old = _snap(plugins=[SnapPlugin("Absynth 5", "VST", "Native Instruments", "5.3", arch="intel"),
+                         SnapPlugin("Absynth 5", "AU", "Native Instruments", "5.3", arch="intel"),
+                         SnapPlugin("Serum", "VST3", "Xfer Records", "1.36", arch="universal", min_macos="14.0"),
+                         SnapPlugin("Mixed", "VST", "Acme", arch="intel"), SnapPlugin("Mixed", "VST3", "Acme", arch="universal")])
+    new = _snap(id="new")
+    new.cpu, new.macos_version = "arm64", "13.6"
+    c = cl.build(old, new, manual_done=set())
+    assert "Apple Silicon" in _item(c, "Absynth 5").warnings[0]
+    assert _item(c, "Serum").warnings == ["The old version needs macOS 14.0; this Mac has 13.6."]
+    assert _item(c, "Mixed").warnings == []        # one format is native
+
+
+def test_no_warnings_on_intel_target_or_unknown():
+    old = _snap(plugins=[SnapPlugin("Absynth 5", "VST", "Native Instruments", arch="intel")])
+    intel = _snap(id="new"); intel.cpu = "x86_64"
+    assert _item(cl.build(old, intel, set()), "Absynth 5").warnings == []
+    assert _item(cl.build(old, _snap(id="x"), set()), "Absynth 5").warnings == []

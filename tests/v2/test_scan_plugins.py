@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import struct
 import threading
 
 from studio_vault.scanners.plugins import (
@@ -153,3 +154,40 @@ class TestKind:
 
     def test_unknown_without_metadata(self, tmp_path):
         assert bundle_metadata(make_bundle(tmp_path, "X.vst", _plist()))["kind"] == ""
+
+
+class TestArch:
+    @staticmethod
+    def _fat(*cpus):
+        head = struct.pack(">II", 0xCAFEBABE, len(cpus))
+        for cpu in cpus:
+            head += struct.pack(">iiIII", cpu, 0, 0, 0, 0)
+        return head
+
+    def _bundle(self, tmp_path, name, binary: bytes, **plist):
+        b = make_bundle(tmp_path, name, _plist(CFBundleExecutable="Bin", **plist))
+        (b / "Contents" / "MacOS").mkdir(exist_ok=True)
+        (b / "Contents" / "MacOS" / "Bin").write_bytes(binary)
+        return b
+
+    def test_universal_arm_intel_unknown(self, tmp_path):
+        X86, ARM = 0x01000007, 0x0100000C
+        cases = {
+            "U.vst3": (self._fat(X86, ARM), "universal"),
+            "A.vst3": (struct.pack("<Ii", 0xFEEDFACF, ARM), "arm64"),
+            "I.vst": (struct.pack("<Ii", 0xFEEDFACF, X86), "intel"),
+            "F.component": (self._fat(X86), "intel"),
+            "G.vst3": (b"not a binary", ""),
+        }
+        for name, (binary, arch) in cases.items():
+            assert bundle_metadata(self._bundle(tmp_path, name, binary))["arch"] == arch, name
+
+    def test_missing_executable_and_min_macos(self, tmp_path):
+        b = make_bundle(tmp_path, "X.vst3", _plist(CFBundleExecutable="Nope", LSMinimumSystemVersion="10.13"))
+        meta = bundle_metadata(b)
+        assert meta["arch"] == ""
+        assert meta["min_macos"] == "10.13"
+
+    def test_executable_name_cannot_escape_bundle(self, tmp_path):
+        b = make_bundle(tmp_path, "X.vst3", _plist(CFBundleExecutable="../../../etc/passwd"))
+        assert bundle_metadata(b)["arch"] == ""

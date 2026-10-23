@@ -15,7 +15,7 @@ const ui = {
   studioChanges: null,
   newmac: { sourceId: "", data: null, filter: "missing", q: "", open: new Set() },
   cmp: { a: "", b: "", data: null, filter: "diff", q: "", open: new Set() },
-  inv: { id: "", data: null, tab: "plugins", q: "", fmt: "", kind: "", vendor: "", sort: "name", dir: 1 },
+  inv: { id: "", data: null, tab: "plugins", q: "", fmt: "", kind: "", vendor: "", arch: "", sort: "name", dir: 1 },
   about: null,
 };
 
@@ -229,6 +229,17 @@ function renderStudio() {
 
     const total = sum.plugin_count || 1;
     const present = FORMATS.filter(([f]) => sum.plugin_formats[f]);
+    if (sum.intel_products) {
+      const native = sum.cpu === "arm64";
+      parts.push(el("div", { class: "card notice" },
+        svg(["M12 3l9 16H3z", "M12 10v4", "M12 17v.5"]),
+        el("div", { style: "flex: 1" },
+          el("b", {}, `${plural(sum.intel_products, "plug-in")} ${sum.intel_products === 1 ? "is" : "are"} Intel-only`),
+          el("div", { class: "soft", style: "font-size: var(--fs-s)" }, native
+            ? `${plural(sum.intel_files, "file")}. On this Mac they only load in a DAW running under Rosetta. Look for Apple Silicon versions.`
+            : `${plural(sum.intel_files, "file")}. They will not run natively on an Apple Silicon Mac. Look for updates before you move.`)),
+        el("button", { class: "btn small", onclick: () => { Object.assign(ui.inv, { tab: "plugins", arch: "intel", kind: "", fmt: "", vendor: "", q: "" }); show("inventory"); } }, "Show them")));
+    }
     parts.push(el("div", { class: "card formats" },
       el("div", { style: "display: flex; justify-content: space-between; color: var(--muted); font-size: var(--fs-s); margin-bottom: 8px" },
         el("span", {}, "Plug-in formats"), el("span", {}, `${num(sum.plugin_count)} files`)),
@@ -530,7 +541,8 @@ function itemRow(i) {
   return el("div", { class: "item" },
     el("input", { type: "checkbox", id, checked: i.done, disabled: auto,
                   title: auto ? "Found on this Mac" : "Tick when done", onchange: (e) => tick(i.id, e.target.checked) }),
-    el("label", { for: id, class: "name" }, i.name, detail ? el("span", { class: "muted" }, ` · ${detail}`) : null),
+    el("label", { for: id, class: "name" }, i.name, detail ? el("span", { class: "muted" }, ` · ${detail}`) : null,
+      (i.warnings || []).map((w) => el("span", { class: "warn-note" }, w))),
     i.download_url ? el("button", { class: "link", onclick: () => call("open_url", i.download_url) }, "Drivers ↗") : null,
     itemStatus(i));
 }
@@ -683,7 +695,7 @@ function renderInventory() {
   const tabs = el("div", { class: "tabs", role: "tablist", "aria-label": "Inventory" },
     [["plugins", "Plug-ins", d.products.length], ["apps", "Apps", d.apps.length], ["hardware", "Hardware", d.hardware.length]].map(([k, label, n]) =>
       el("button", { class: `tab${inv.tab === k ? " on" : ""}`, role: "tab", "aria-selected": String(inv.tab === k),
-                     onclick: () => { Object.assign(inv, { tab: k, q: "", fmt: "", kind: "", vendor: "", sort: "name", dir: 1 }); renderInventory(); } },
+                     onclick: () => { Object.assign(inv, { tab: k, q: "", fmt: "", kind: "", vendor: "", arch: "", sort: "name", dir: 1 }); renderInventory(); } },
         `${label} `, el("span", { class: "muted", style: "font-weight: 400" }, num(n)))));
 
   // Chip groups filter the plug-in table: key is the inv field, values [value, label].
@@ -703,6 +715,7 @@ function renderInventory() {
       vendors.map((v) => el("option", { value: v, selected: inv.vendor === v }, v))) : null);
   const filters = plugins ? el("div", { class: "toolbar", style: "margin-top: 0" },
     chipGroup("kind", "Type", [["", "All types"], ...[["Instrument", "Instruments"], ["Effect", "Effects"], ["MIDI", "MIDI"]].filter(([k]) => kinds.has(k))]),
+    d.products.some((p) => p.arch) ? chipGroup("arch", "Processor", [["", "Any processor"], ["intel", "Intel only"]]) : null,
     chipGroup("fmt", "Format", [["", "All formats"], ["VST3", "VST3"], ["AU", "AU"], ["CLAP", "CLAP"], ["VST", "VST"], ["AAX", "AAX"]])) : null;
 
   const tableBox = el("div", { id: "inv-table" });
@@ -737,15 +750,18 @@ function renderInventory() {
     let rows, header, row;
     if (inv.tab === "plugins") {
       rows = d.products.filter((p) => (!q || p.name.toLowerCase().includes(q) || (p.vendor || "").toLowerCase().includes(q))
-        && (!inv.fmt || p.formats.includes(inv.fmt)) && (!inv.kind || p.kind === inv.kind) && (!inv.vendor || p.vendor === inv.vendor));
+        && (!inv.fmt || p.formats.includes(inv.fmt)) && (!inv.kind || p.kind === inv.kind) && (!inv.vendor || p.vendor === inv.vendor)
+        && (!inv.arch || p.arch));
       header = [sortHeader("name", "Product"), sortHeader("kind", "Type"), sortHeader("vendor", "Vendor"), el("th", {}, "Formats"), el("th", {}, "Version"), sortHeader("size", "Size", "num"), el("th", {}, el("span", { class: "sr" }, "Actions"))];
       row = (p) => el("tr", {},
-        el("td", {}, p.name), el("td", { class: "soft" }, p.kind || "—"),
+        el("td", {}, p.name, p.arch ? el("span", { class: "intel-tag", title: "No Apple Silicon code in these formats" },
+          p.arch === "intel" ? "Intel only" : `Intel: ${p.intel_formats.join(", ")}`) : null),
+        el("td", { class: "soft" }, p.kind || "—"),
         el("td", {}, p.vendor_url
           ? el("button", { class: "vendor-link", title: `Open ${p.vendor}'s download page`, onclick: () => call("open_url", p.vendor_url) }, p.vendor, " ↗")
           : el("span", { class: "soft" }, p.vendor || "—")),
         el("td", { class: "nw" }, p.formats.map((f) => el("span", { class: "f" }, f))),
-        el("td", { class: "soft" }, p.version || "—"), el("td", { class: "num soft" }, fmtBytes(p.size)),
+        el("td", { class: "soft nw" }, p.version || "—"), el("td", { class: "num soft" }, fmtBytes(p.size)),
         actions(p.path));
     } else if (inv.tab === "apps") {
       rows = d.apps.filter((a) => !q || a.name.toLowerCase().includes(q) || (a.developer || "").toLowerCase().includes(q));
