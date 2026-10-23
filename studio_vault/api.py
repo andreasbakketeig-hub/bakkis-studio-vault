@@ -163,7 +163,7 @@ class Api:
 
     def set_settings(self, changes: dict) -> dict:
         with self._lock:
-            allowed = {"scan_on_launch", "auto_save_snapshot", "extra_plugin_folders"}
+            allowed = {"scan_on_launch", "auto_save_snapshot", "extra_plugin_folders", "welcome_seen"}
             picked = {k: v for k, v in (changes or {}).items() if k in allowed}
             merged = {**asdict(self._settings), **picked}
             self._settings = config.normalize_settings(merged)

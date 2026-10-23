@@ -1,2 +1,5 @@
+# v2 (studio_vault/, python -m studio_vault): pywebview window in the system WebKit.
+pywebview>=5.0
+# v1 (app/, main.py): CustomTkinter UI. Pillow also draws the app icon (tools/make_icon.py).
 customtkinter>=5.2.2
 Pillow>=10.0.0

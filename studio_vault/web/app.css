@@ -39,8 +39,12 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round
 /* ── rail ─────────────────────────────────────────────────────────── */
 .rail { width: 216px; flex: none; padding: 28px 16px 20px; border-right: 1px solid var(--line);
         display: flex; flex-direction: column; gap: 4px; }
-.brand { padding: 0 12px 28px; font-weight: 800; letter-spacing: .1em; }
-.brand span { display: block; font-weight: 500; font-size: var(--fs-s); color: var(--muted); letter-spacing: .18em; }
+.logo { display: inline-block; flex: none; background-color: currentColor; -webkit-mask-position: center; -webkit-mask-size: contain; -webkit-mask-repeat: no-repeat; }
+.logo-wordmark { -webkit-mask-image: url(img/logo-wordmark.png); aspect-ratio: 800 / 121; }
+.logo-boxed { -webkit-mask-image: url(img/logo-boxed.png); aspect-ratio: 800 / 198; }
+.brand { padding: 0 12px 28px; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.brand .logo { height: 14px; color: var(--ink); }
+.brand-sub { font-size: var(--fs-s); font-weight: 600; letter-spacing: .22em; color: var(--muted); }
 .nav { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 8px;
        background: none; border: 0; color: var(--muted); text-align: left; }
 .nav svg { width: 18px; height: 18px; flex: none; }
@@ -190,6 +194,13 @@ tbody tr:hover td { background: var(--raised); }
 .points div { display: flex; gap: 16px; align-items: flex-start; }
 .points svg { width: 20px; height: 20px; flex: none; margin-top: 2px; color: var(--accent); stroke-width: 2; }
 .welcome .btn { font-size: var(--fs-m); padding: 12px 24px; border-radius: 10px; }
+.hello-wrap { z-index: 20; }
+.hello { width: min(520px, 92vw); display: flex; flex-direction: column; gap: 12px; padding: 32px 36px 24px; }
+.hello p { margin: 0; line-height: 1.5; color: var(--soft); }
+.hello .logo { height: 32px; color: var(--ink); align-self: flex-start; }
+.hello .actions { justify-content: flex-start; margin-top: 8px; }
+.hello .foot { font-size: var(--fs-s); color: var(--muted); }
+.hello .foot button { background: none; border: 0; padding: 0 2px; color: var(--soft); font-size: inherit; text-decoration: underline; }
 #toasts { position: fixed; right: 24px; bottom: 24px; display: flex; flex-direction: column; gap: 8px; z-index: 10; }
 .toast { background: var(--raised); border: 1px solid var(--line-strong); border-left: 3px solid var(--accent); border-radius: 8px; padding: 8px 16px; max-width: 380px; }
 .toast.error { border-left-color: var(--danger); } .toast.warning { border-left-color: var(--warn); }

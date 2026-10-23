@@ -1,6 +1,6 @@
 # BAKKIS STUDIO VAULT v2 — rebuild plan
 
-Status: milestones 1–5 done 2026-10-23 (backend, app shell, full UI per the approved design canvas: My Studio, Snapshots + compare, New Mac checklist, Inventory, settings drawer, first launch; run with `.venv/bin/python -m studio_vault`). Next: milestone 6 (packaging, README, LICENSE). Branch `v2-pywebview` (off `feature/license-vault`).
+Status: milestones 1–6 done 2026-10-23. Universal .app builds with `./build_mac_app.sh` (17 MB zip) and runs; README, PACKAGING.md, LICENSE, FUNDING.yml and the "Hi, I'm BAKKIS" card match Music Sorter. Open: navigation around the three jobs (overview / migrate / compare), milestone 7 (real two-Mac test), milestone 8 (merge, tag v2.0.0, release). Branch `v2-pywebview`.
 Owner: Andreas (BAKKIS). Communicate with him in Norwegian; code, comments and commits in English.
 
 ## Goal
@@ -56,6 +56,7 @@ hardware) as a **snapshot over time** with a **new-Mac migration checklist**. Th
 | Privacy in shared files | Snapshot exports contain no serials, no Keychain data, and replace the home folder in paths with `~`. Machine id is a salted hash, not the raw IOPlatformUUID. Hostname kept (user can rename the snapshot). |
 | Platform | macOS only. Universal app (Apple Silicon + Intel), python.org Python 3.12 universal2, minimum macOS 13 Ventura. |
 | Signing | Build script supports unsigned (default) and Developer ID signed + notarized, as Music Sorter. |
+| Palette | Shared BAKKIS app palette (BAKKIS_app_palette.md): colour tokens, four font sizes, 8 px grid. |
 | Distribution | GitHub Releases, zip per version. |
 | License | MIT. BAKKIS name and logo excluded (same wording as Music Sorter). Audit git history for personal data before the repo goes public. |
 | Promo & support | Discreet, as Music Sorter: About section with follow links (bakkis.com, Instagram, songshare), Ko-fi, `.github/FUNDING.yml`. No popups. |

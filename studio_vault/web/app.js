@@ -735,6 +735,7 @@ function renderSettings() {
     el("div", { class: "label", style: "margin-top: 28px" }, "ABOUT"),
     el("p", { style: "margin: 8px 0 16px", class: "soft" }, `${a.app_name} ${a.version} · macOS ${a.macos}`, el("br"),
       el("span", { class: "muted", style: "font-size: var(--fs-s)" }, "Free and open source. Made by BAKKIS, DJ and producer from Norway.")),
+    el("button", { class: "lk", onclick: () => { closeSettings(); showHello(); } }, el("span", {}, "Why I built this"), el("span", { class: "muted" }, "›")),
     link("bakkis.com", a.links.website),
     link("Instagram", a.links.instagram),
     link("Listen on Spotify, SoundCloud, Beatport …", a.links.music),
@@ -750,7 +751,7 @@ function renderWelcome() {
   const point = (paths, bold, rest) => el("div", {}, svg(paths), el("span", {}, el("b", {}, bold), " ", el("span", { class: "soft" }, rest)));
   const w = $("#welcome");
   w.replaceChildren(el("div", { class: "inner" },
-    el("div", { class: "brand", style: "padding: 0; font-size: var(--fs-m)" }, "BAKKIS", el("span", {}, "STUDIO VAULT")),
+    el("div", { class: "brand", style: "padding: 0" }, el("span", { class: "logo logo-wordmark", role: "img", "aria-label": "BAKKIS", style: "height: 18px" }), el("span", { class: "brand-sub" }, "STUDIO VAULT")),
     el("h1", {}, "Know your studio.", el("br"), "Move it anywhere."),
     el("p", { class: "lead" }, "See every plug-in, music app and piece of gear on this Mac, keep snapshots over time, and get a checklist when you set up a new one."),
     el("div", { class: "points" },
@@ -765,6 +766,34 @@ function renderWelcome() {
     el("p", { class: "muted", style: "margin-top: 16px; font-size: var(--fs-s)" }, "Moving to a new Mac? Scan the old one first, export the snapshot, then import it here.")));
   w.classList.remove("hidden");
   w.querySelector(".btn.primary").focus();
+}
+
+// ── "Hi, I'm BAKKIS": once on first launch, and from About ───────────────────
+
+const SUPPORT_URL = "https://ko-fi.com/bakkis";
+
+function showHello() {
+  const wrap = $("#hello");
+  const close = async () => {
+    wrap.classList.add("hidden");
+    wrap.replaceChildren();
+    if (!ui.st.settings.welcome_seen) await setSetting("welcome_seen", true);
+    const next = $("#welcome .btn.primary");
+    if (next && !$("#welcome").classList.contains("hidden")) next.focus();
+  };
+  const go = el("button", { class: "btn primary", onclick: close }, "Let's go");
+  wrap.replaceChildren(el("div", { class: "modal hello" },
+    el("span", { class: "logo logo-boxed", role: "img", "aria-label": "BAKKIS" }),
+    el("h2", { id: "hello-title", style: "font-size: var(--fs-l); margin: 4px 0 0" }, "Hi, I'm BAKKIS."),
+    el("p", {}, "Every time I set up a new Mac, I lost days hunting for installers, serials and logins for hundreds of plug-ins, and I always forgot something. So I built the app I wanted: scan the old Mac, get a checklist for the new one."),
+    el("p", {}, "It only reads your Mac. It never moves, changes or deletes a plug-in, and nothing leaves your computer."),
+    el("div", { class: "actions" }, go),
+    el("p", { class: "foot" }, "Free and open source. ",
+      el("button", { onclick: () => call("open_url", SUPPORT_URL) }, "Buy me a coffee ☕"))));
+  wrap.onclick = (e) => { if (e.target === wrap) close(); };
+  wrap.onkeydown = (e) => { if (e.key === "Escape" || e.key === "Enter") { e.preventDefault(); close(); } };
+  wrap.classList.remove("hidden");
+  go.focus();
 }
 
 // ── events from Python ───────────────────────────────────────────────────────
@@ -819,4 +848,5 @@ window.addEventListener("pywebviewready", async () => {
   render();
   if (!ui.st.has_snapshots && !ui.st.current && ui.st.scan.status !== "running") renderWelcome();
   else if (ui.st.settings.scan_on_launch && ui.st.scan.status !== "running") startScan();
+  if (!ui.st.settings.welcome_seen) showHello();
 });

@@ -72,6 +72,7 @@ class Settings:
     auto_save_snapshot: bool = True
     extra_plugin_folders: list[str] = field(default_factory=list)
     legacy_import_done: bool = False
+    welcome_seen: bool = False          # the "Hi, I'm BAKKIS" card, once on first launch
 
 
 def normalize_settings(raw: dict) -> Settings:

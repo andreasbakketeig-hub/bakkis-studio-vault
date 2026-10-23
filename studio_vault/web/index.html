@@ -8,7 +8,7 @@
 </head>
 <body>
   <nav class="rail" aria-label="Main">
-    <div class="brand">BAKKIS<span>STUDIO VAULT</span></div>
+    <div class="brand"><span class="logo logo-wordmark" role="img" aria-label="BAKKIS"></span><span class="brand-sub">STUDIO VAULT</span></div>
     <button class="nav active" data-view="studio">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>My Studio</button>
     <button class="nav" data-view="snapshots">
@@ -36,6 +36,7 @@
   <aside class="drawer hidden" id="drawer" aria-label="Settings"></aside>
   <div class="modal-wrap hidden" id="modal" role="dialog" aria-modal="true"></div>
   <div class="welcome hidden" id="welcome"></div>
+  <div class="modal-wrap hello-wrap hidden" id="hello" role="dialog" aria-modal="true" aria-labelledby="hello-title"></div>
   <div id="toasts" aria-live="polite"></div>
   <script src="app.js"></script>
 </body>
