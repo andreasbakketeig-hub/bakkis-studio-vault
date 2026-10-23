@@ -18,6 +18,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Protocol
 
+from studio_vault.handoff.pluginlist import au_component_names, vst3_class_names
+
 # ── Format registry ──────────────────────────────────────────────────────────
 
 PLUGIN_FORMATS: dict[str, str] = {
@@ -69,6 +71,7 @@ class Plugin:
     kind: str = ""            # KIND_INSTRUMENT | KIND_EFFECT | KIND_MIDI | "" (unknown)
     arch: str = ""            # ARCH_UNIVERSAL | ARCH_ARM | ARCH_INTEL | "" (unknown)
     min_macos: str = ""       # LSMinimumSystemVersion, e.g. "10.13"
+    live_names: tuple[str, ...] = ()   # names Live stores in a set: "Vendor: Name" per AU component, VST3 class names
 
 
 @dataclass
@@ -249,7 +252,8 @@ def _read_plugin(bundle: Path, cache: SizeCache) -> Plugin:
 
 def bundle_metadata(bundle: Path) -> dict:
     """Extract version, developer, bundle_id and modified date from a bundle."""
-    meta: dict = {"version": "", "developer": "", "bundle_id": "", "modified": "", "kind": "", "arch": "", "min_macos": ""}
+    meta: dict = {"version": "", "developer": "", "bundle_id": "", "modified": "", "kind": "", "arch": "", "min_macos": "",
+                  "live_names": ()}
 
     try:
         meta["modified"] = datetime.datetime.fromtimestamp(
@@ -274,6 +278,11 @@ def bundle_metadata(bundle: Path) -> dict:
     meta["developer"] = _developer_from_plist(plist)
     meta["kind"] = _kind_from_plist(plist) or _kind_from_vst3_moduleinfo(bundle)
     meta["min_macos"] = str(plist.get("LSMinimumSystemVersion") or "").strip()
+    suffix = bundle.suffix.lower()
+    if suffix == ".component":
+        meta["live_names"] = tuple(f"{v}: {n}" if v else n for v, n in au_component_names(plist))
+    elif suffix == ".vst3":
+        meta["live_names"] = tuple(vst3_class_names(bundle))
     executable = str(plist.get("CFBundleExecutable") or "").strip()
     if executable and "/" not in executable:
         meta["arch"] = binary_arch(bundle / "Contents" / "MacOS" / executable)

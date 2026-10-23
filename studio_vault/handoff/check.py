@@ -15,11 +15,11 @@ Self-contained: standard library only.
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 
 from studio_vault.handoff.als import (KIND_M4L, LOC_EXTERNAL, LOC_PACK, LOC_USER_LIBRARY,
                                       LiveSet, PluginUse, other_sets, version_tuple)
+from studio_vault.handoff import match
 from studio_vault.handoff.pluginlist import PluginList
 
 GREEN = "green"
@@ -62,40 +62,17 @@ class Report:
 
 # ── matching plug-ins against the receiver's list ─────────────────────────────
 
-_BITNESS = re.compile(r"[\s_\-]*(x64|x86_64|64[\s_\-]?bit)$", re.IGNORECASE)
-_FORMAT_WORD = re.compile(r"[\s_\-]*(vst3?|au|aax|clap)$", re.IGNORECASE)
-
-INSTALLED = "installed"
-OTHER_FORMAT = "other_format"
-MISSING = "missing"
+INSTALLED, OTHER_FORMAT, MISSING = match.INSTALLED, match.OTHER_FORMAT, match.MISSING
 UNKNOWN = "unknown"
-
-
-def _key(name: str) -> str:
-    name = _FORMAT_WORD.sub("", _BITNESS.sub("", (name or "").strip()))
-    return re.sub(r"[^a-z0-9]+", "", name.lower())
 
 
 class _Receiver:
     def __init__(self, plugin_list: PluginList) -> None:
-        self.by_fmt: dict[str, dict[str, set[str]]] = {}   # fmt -> key -> vendor keys
-        self.any_fmt: dict[str, set[str]] = {}               # key -> formats
-        for e in plugin_list.plugins:
-            k = _key(e.name)
-            self.by_fmt.setdefault(e.fmt, {}).setdefault(k, set()).add(_key(e.vendor))
-            self.any_fmt.setdefault(k, set()).add(e.fmt)
+        self.index = match.PluginIndex((e.name, e.fmt, e.vendor) for e in plugin_list.plugins)
 
     def status(self, p: PluginUse) -> tuple[str, list[str]]:
-        k = _key(p.name)
-        same = self.by_fmt.get(p.fmt, {})
-        if k in same:
-            vendors = same[k]
-            if p.fmt != "AU" or not p.vendor or _key(p.vendor) in vendors or "" in vendors:
-                return INSTALLED, [p.fmt]
-        others = sorted(self.any_fmt.get(k, set()) - {p.fmt})
-        if others:
-            return OTHER_FORMAT, others
-        return MISSING, []
+        status, have = self.index.status(p.name, p.fmt, p.vendor)
+        return status, [f for f in have if f != p.fmt] if status == OTHER_FORMAT else have
 
 
 # ── the checks ────────────────────────────────────────────────────────────────

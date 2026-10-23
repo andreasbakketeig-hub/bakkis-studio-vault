@@ -14,18 +14,15 @@ Read-only: project files are only read, never changed.
 
 from __future__ import annotations
 
-import gzip
 import os
-import re
-import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterable
 
-from studio_vault.scanners.plugins import normalize_product_name
+from studio_vault.handoff import als
+from studio_vault.handoff.match import PluginIndex
 from studio_vault.snapshot import Snapshot, scrub_path
 
-MAX_XML_BYTES = 256 * 1024 * 1024   # refuse absurdly large (or malicious) files
 MAX_PROJECTS = 10_000
 
 INSTALLED = "installed"
@@ -72,54 +69,17 @@ class ProjectCheck:
 
 # ── Parsing ───────────────────────────────────────────────────────────────────
 
-def _value(el: ET.Element, child: str) -> str:
-    node = el.find(child)
-    return (node.get("Value") or "").strip() if node is not None else ""
-
-
 def parse_als(path: Path | str) -> Project:
+    """The plug-ins a set uses, read with the Handoff reader (one reader for the whole app)."""
     path = Path(path)
     project = Project(name=path.stem, path=scrub_path(str(path)))
     try:
-        with path.open("rb") as raw:
-            magic = raw.read(2)
-    except OSError:
-        project.error = "Could not open this file."
+        live_set = als.read(path)
+    except als.AlsError as exc:
+        project.error = str(exc)
         return project
-    if not magic:
-        project.error = "The file is empty."
-        return project
-    if magic != b"\x1f\x8b":
-        project.error = ("Saved by Live 7 or older, which used another file format. "
-                         "Open it in Live and save it to check it here.")
-        return project
-    try:
-        with gzip.open(path, "rb") as fh:
-            data = fh.read(MAX_XML_BYTES + 1)
-        if len(data) > MAX_XML_BYTES:
-            raise ValueError("file too large")
-        root = ET.fromstring(data)
-    except (OSError, EOFError, ValueError, ET.ParseError) as exc:
-        project.error = f"Could not read this project ({exc.__class__.__name__})."
-        return project
-    if root.tag != "Ableton":
-        project.error = "Not an Ableton Live set."
-        return project
-    project.live_version = (root.get("Creator") or "").replace("Ableton Live", "").strip()
-
-    seen: set[tuple[str, str]] = set()
-    for tag, fmt in _TAGS.items():
-        for el in root.iter(tag):
-            if fmt == "VST":
-                name = _value(el, "PlugName") or Path(_value(el, "Path")).stem
-                vendor = ""
-            else:
-                name, vendor = _value(el, "Name"), _value(el, "Manufacturer")
-            if not name or (name.lower(), fmt) in seen:
-                continue
-            seen.add((name.lower(), fmt))
-            project.plugins.append(ProjectPlugin(name, fmt, vendor))
-    project.plugins.sort(key=lambda p: (p.name.lower(), p.fmt))
+    project.live_version = live_set.live_version
+    project.plugins = [ProjectPlugin(p.name, p.fmt, p.vendor) for p in live_set.plugins]
     return project
 
 
@@ -138,64 +98,31 @@ def find_projects(folder: Path | str, limit: int = MAX_PROJECTS) -> list[Path]:
 
 # ── Checking against a Mac ────────────────────────────────────────────────────
 
-_BITNESS = re.compile(r"[\s_\-]*(x64|x86_64|64[\s_\-]?bit)$", re.IGNORECASE)
+def _index(target: Snapshot) -> PluginIndex:
+    """What *target* has, with the names Live stores (AU components, VST3 classes) as well."""
+    entries: list[tuple[str, str, str]] = []
+    for p in target.plugins:
+        entries.append((p.name, p.fmt, p.developer))
+        for live_name in p.live_names:
+            vendor, _, name = live_name.partition(": ") if p.fmt == "AU" else ("", "", live_name)
+            entries.append((name or live_name, p.fmt, vendor or p.developer))
+    return PluginIndex(entries)
 
 
-def _key(name: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "", normalize_product_name(_BITNESS.sub("", name.strip())))
-
-
-class _Installed:
-    """Formats per product on a Mac, with the fuzzy lookups Live's names need."""
-
-    def __init__(self, target: Snapshot) -> None:
-        self.by_key: dict[str, set[str]] = {}
-        for p in target.plugins:
-            self.by_key.setdefault(_key(p.name), set()).add(p.fmt)
-        self._cache: dict[tuple[str, str], set[str]] = {}
-
-    def formats(self, name: str, vendor: str = "") -> set[str]:
-        k, v = _key(name), re.sub(r"[^a-z0-9]+", "", vendor.lower())
-        hit = self._cache.get((k, v))
-        if hit is not None:
-            return hit
-        found = set(self.by_key.get(k, set()))
-        if not found and v:
-            # AU names in Live leave out the vendor ("Pro-C 2" for "FabFilter Pro-C 2"),
-            # or abbreviate it ("FF Pro-L 2").
-            found = set(self.by_key.get(v + k, set()))
-            rest = name.strip().split(" ", 1)
-            if not found and len(rest) == 2:
-                found = set(self.by_key.get(v + _key(rest[1]), set()))
-        if not found and len(k) >= 4:
-            # "SPAN" vs "Voxengo SPAN", and the other way round.
-            for key, fmts in self.by_key.items():
-                if len(key) >= 4 and (key.endswith(k) or k.endswith(key)):
-                    found |= fmts
-        self._cache[(k, v)] = found
-        return found
-
-
-def check(project: Project, target: Snapshot, installed: _Installed | None = None) -> ProjectCheck:
-    have_on_mac = installed or _Installed(target)
+def check(project: Project, target: Snapshot, installed: PluginIndex | None = None) -> ProjectCheck:
+    index = installed or _index(target)
     results: list[PluginCheck] = []
     for p in project.plugins:
-        have = have_on_mac.formats(p.name, p.vendor)
-        if p.fmt in have:
-            status = INSTALLED
-        elif have:
-            status = OTHER_FORMAT
-        else:
-            status = MISSING
-        results.append(PluginCheck(p.name, p.fmt, p.vendor, status, sorted(have)))
+        status, have = index.status(p.name, p.fmt, p.vendor)
+        results.append(PluginCheck(p.name, p.fmt, p.vendor, status, have))
     order = {MISSING: 0, OTHER_FORMAT: 1, INSTALLED: 2}
     results.sort(key=lambda r: (order[r.status], r.name.lower()))
     return ProjectCheck(project, results)
 
 
 def check_all(projects: Iterable[Project], target: Snapshot) -> list[ProjectCheck]:
-    installed = _Installed(target)
-    checks = [check(p, target, installed) for p in projects]
+    index = _index(target)
+    checks = [check(p, target, index) for p in projects]
     checks.sort(key=lambda c: (-c.missing, c.project.name.lower()))
     return checks
 

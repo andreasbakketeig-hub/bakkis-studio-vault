@@ -191,3 +191,16 @@ class TestArch:
     def test_executable_name_cannot_escape_bundle(self, tmp_path):
         b = make_bundle(tmp_path, "X.vst3", _plist(CFBundleExecutable="../../../etc/passwd"))
         assert bundle_metadata(b)["arch"] == ""
+
+
+class TestLiveNames:
+    def test_au_components_and_vst3_classes(self, tmp_path):
+        au_b = make_bundle(tmp_path, "WaveShell1-AU 15.component",
+                           _plist(AudioComponents=[{"name": "Waves: H-Delay Stereo"}, {"name": "Waves: CLA-2A Mono"}]))
+        assert bundle_metadata(au_b)["live_names"] == ("Waves: H-Delay Stereo", "Waves: CLA-2A Mono")
+        v3 = make_bundle(tmp_path, "Serum2.vst3", _plist())
+        (v3 / "Contents" / "Resources").mkdir()
+        (v3 / "Contents" / "Resources" / "moduleinfo.json").write_text(
+            '{"Classes": [{"Category": "Audio Module Class", "Name": "Serum 2",}],}')
+        assert bundle_metadata(v3)["live_names"] == ("Serum 2",)
+        assert bundle_metadata(make_bundle(tmp_path, "X.vst", _plist()))["live_names"] == ()

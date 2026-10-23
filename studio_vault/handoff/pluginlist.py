@@ -100,7 +100,8 @@ def _version(plist: dict) -> str:
     return str(plist.get("CFBundleShortVersionString") or plist.get("CFBundleVersion") or "").strip()
 
 
-def _vst3_class_names(bundle: Path) -> list[str]:
+def vst3_class_names(bundle: Path) -> list[str]:
+    """Audio Module Class names from a VST3 bundle's moduleinfo.json (what Live stores)."""
     try:
         text = (bundle / "Contents" / "Resources" / "moduleinfo.json").read_text(encoding="utf-8", errors="replace")
     except OSError:
@@ -119,21 +120,27 @@ def _entries_for(bundle: Path) -> list[Entry]:
     plist = _plist(bundle)
     version = _version(plist)
     if fmt == "AU":
-        out = []
-        for comp in plist.get("AudioComponents") or []:
-            if not isinstance(comp, dict):
-                continue
-            full = str(comp.get("name") or "")
-            vendor, _, name = full.partition(":")
-            if not name:
-                vendor, name = "", full
-            if name.strip():
-                out.append(Entry(name.strip(), fmt, vendor.strip(), version))
+        out = [Entry(name, fmt, vendor, version) for vendor, name in au_component_names(plist)]
         return out or [Entry(bundle.stem, fmt, "", version)]
     if fmt == "VST3":
-        names = _vst3_class_names(bundle) or [bundle.stem]
+        names = vst3_class_names(bundle) or [bundle.stem]
         return [Entry(n, fmt, "", version) for n in names]
     return [Entry(bundle.stem, fmt, "", version)]
+
+
+def au_component_names(plist: dict) -> list[tuple[str, str]]:
+    """(vendor, name) per Audio Unit component ("FabFilter: Pro-C 2"), as Live stores them."""
+    out: list[tuple[str, str]] = []
+    for comp in plist.get("AudioComponents") or []:
+        if not isinstance(comp, dict):
+            continue
+        full = str(comp.get("name") or "")
+        vendor, _, name = full.partition(":")
+        if not name:
+            vendor, name = "", full
+        if name.strip() and (vendor.strip(), name.strip()) not in out:
+            out.append((vendor.strip(), name.strip()))
+    return out
 
 
 def _find_bundles(root: Path) -> list[Path]:

@@ -72,6 +72,7 @@ class SnapPlugin:
     kind: str = ""          # Instrument | Effect | MIDI | ""
     arch: str = ""          # universal | arm64 | intel | ""
     min_macos: str = ""
+    live_names: tuple[str, ...] = ()   # names Live stores: "Vendor: Name" (AU), class names (VST3)
 
 
 @dataclass(frozen=True)
@@ -226,6 +227,7 @@ def from_scan(
                 bundle_id=getattr(p, "bundle_id", ""), size=p.file_size,
                 modified=p.modified, path=scrub_path(p.path), kind=getattr(p, "kind", ""),
                 arch=getattr(p, "arch", ""), min_macos=getattr(p, "min_macos", ""),
+                live_names=tuple(getattr(p, "live_names", ())),
             ) for p in plugins),
             key=lambda p: (p.name.lower(), p.fmt),
         ),
@@ -271,6 +273,7 @@ def _plugin(d: dict) -> SnapPlugin:
         version=_s(d, "version"), bundle_id=_s(d, "bundle_id"),
         size=_i(d, "size") or _i(d, "file_size"), modified=_s(d, "modified"),
         path=scrub_path(_s(d, "path")), kind=_s(d, "kind"), arch=_s(d, "arch"), min_macos=_s(d, "min_macos"),
+        live_names=tuple(x for x in d.get("live_names") or () if isinstance(x, str) and x.strip()),
     )
 
 
