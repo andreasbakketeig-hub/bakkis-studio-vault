@@ -11,6 +11,7 @@ from __future__ import annotations
 import datetime
 import os
 import plistlib
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
@@ -28,6 +29,7 @@ CATEGORY_SAMPLE_MANAGER   = "Sample Manager"
 CATEGORY_AUDIO_UTILITY    = "Audio Utility"
 CATEGORY_HARDWARE_UTILITY = "Hardware Utility"
 CATEGORY_CLOUD_SYNC       = "Cloud & Sync"
+CATEGORY_MUSIC_TOOL       = "Music Tool"
 
 ALL_CATEGORIES: list[str] = [
     CATEGORY_DAW,
@@ -38,6 +40,7 @@ ALL_CATEGORIES: list[str] = [
     CATEGORY_AUDIO_UTILITY,
     CATEGORY_HARDWARE_UTILITY,
     CATEGORY_CLOUD_SYNC,
+    CATEGORY_MUSIC_TOOL,
 ]
 
 # ── Scan paths ────────────────────────────────────────────────────────────────
@@ -74,6 +77,7 @@ PRIMARY_DAW_HINTS: list[str] = [
 # Each entry: (match_substring, category, fallback_developer)
 # Matching is case-insensitive substring search against the .app filename stem.
 # Entries are evaluated in order; first match wins — list specific before general.
+# A leading "=" means the whole name must match (short names such as "Max" or "XO").
 
 KNOWN_APPS: list[tuple[str, str, str]] = [
     # ── DAWs ──────────────────────────────────────────────────────────────────
@@ -191,7 +195,43 @@ KNOWN_APPS: list[tuple[str, str, str]] = [
     ("BOSS Tone Studio",        CATEGORY_HARDWARE_UTILITY, "Roland"),
     ("Line 6",                  CATEGORY_HARDWARE_UTILITY, "Line 6"),
     ("Helix Native",            CATEGORY_HARDWARE_UTILITY, "Line 6"),
+
+    # ── Editors, instruments and other music tools (standalone apps) ──────────
+    ("Melodyne",                CATEGORY_MUSIC_TOOL,      "Celemony"),
+    ("iZotope RX",              CATEGORY_MUSIC_TOOL,      "iZotope"),
+    ("RX 1",                    CATEGORY_MUSIC_TOOL,      "iZotope"),
+    ("SpectraLayers",           CATEGORY_MUSIC_TOOL,      "Steinberg"),
+    ("WaveLab",                 CATEGORY_MUSIC_TOOL,      "Steinberg"),
+    ("RipX",                    CATEGORY_MUSIC_TOOL,      "Hit'n'Mix"),
+    ("Mixed In Key",            CATEGORY_MUSIC_TOOL,      "Mixed In Key"),
+    ("Platinum Notes",          CATEGORY_MUSIC_TOOL,      "Mixed In Key"),
+    ("Captain Plugins",         CATEGORY_MUSIC_TOOL,      "Mixed In Key"),
+    ("MPC",                     CATEGORY_MUSIC_TOOL,      "Akai Professional"),
+    ("=Max",                    CATEGORY_MUSIC_TOOL,      "Cycling '74"),
+    ("=XO",                     CATEGORY_MUSIC_TOOL,      "XLN Audio"),
+    ("=Vital",                  CATEGORY_MUSIC_TOOL,      "Vital Audio"),
+    ("Dubler",                  CATEGORY_MUSIC_TOOL,      "Vochlea"),
+    ("ROLI",                    CATEGORY_MUSIC_TOOL,      "ROLI"),
+    ("Kontakt",                 CATEGORY_MUSIC_TOOL,      "Native Instruments"),
+    ("Audacity",                CATEGORY_MUSIC_TOOL,      "Audacity"),
+    ("Ozone",                   CATEGORY_MUSIC_TOOL,      "iZotope"),
 ]
+
+# Uninstallers sit next to the apps they remove; they are not apps to reinstall.
+_UNINSTALLER = ("uninstall", "remover")
+
+
+def _matches(stem_lower: str, match_str: str) -> bool:
+    """Whole words only ("RME" is not in "Hermes"); a digit may follow ("Cubase13")."""
+    needle = match_str.lstrip("=").lower()
+    if match_str.startswith("="):
+        return stem_lower == needle
+    return re.search(rf"(?<![a-z0-9]){re.escape(needle)}(?![a-z])", stem_lower) is not None
+
+
+def _is_uninstaller(stem: str) -> bool:
+    s = stem.lower()
+    return any(w in s for w in _UNINSTALLER) or s.startswith("remove ")
 
 
 # ── Data model ────────────────────────────────────────────────────────────────
@@ -326,8 +366,10 @@ def _classify(app_path: Path) -> MusicApp | None:
     :data:`KNOWN_APPS`, else return ``None``.
     """
     stem_lower = app_path.stem.lower()
+    if _is_uninstaller(stem_lower):
+        return None
     for match_str, category, known_developer in KNOWN_APPS:
-        if match_str.lower() in stem_lower:
+        if _matches(stem_lower, match_str):
             meta = _app_metadata(app_path)
             # The registry name is curated; Info.plist strings are often just "© 2024".
             developer = known_developer or meta["developer"]

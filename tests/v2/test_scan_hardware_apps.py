@@ -122,6 +122,16 @@ class TestScanMusicApps:
         assert app.developer == "Native Instruments"
 
 
+    def test_music_tools_and_no_uninstallers(self, tmp_path):
+        apps = tmp_path / "Applications"
+        for name in ("Melodyne.app", "iZotope RX 8 Audio Editor.app", "MPC.app", "Max.app", "XO.app", "Vital.app",
+                     "3ds Max.app", "Xojo.app", "Overbridge_Uninstaller.app", "Uninstall_SubBoomBass.app",
+                     "Remove Soundtoys.app", "MOTIVMix Uninstaller.app", "Overbridge Engine.app", "Hermes.app", "Cubase13.app"):
+            make_bundle(apps, name, {})
+        names = {a.name for a in scan_music_apps([str(apps)])}
+        assert names == {"Melodyne", "iZotope RX 8 Audio Editor", "MPC", "Max", "XO", "Vital", "Overbridge Engine", "Cubase13"}
+
+
 class TestDeviceDetails:
     def test_channels_rate_and_connection(self):
         from studio_vault.scanners.hardware import HardwareDevice, device_details
