@@ -598,7 +598,7 @@ class Api:
         def run() -> dict:
             pl = pluginlist.scan()
             dest = self._require_native().choose_save_file(
-                f"{_safe_name(pl.machine_name)} plug-ins{pluginlist.FILE_SUFFIX}", ("Plug-in list (*.handoffplugins)",))
+                f"{_safe_name(pl.machine_name)} plug-ins{pluginlist.FILE_SUFFIX}", ("Handoff plugin list (*.handoffplugins)",))
             if not dest:
                 return _ok(cancelled=True)
             out = pluginlist.save(pl, Path(dest))
@@ -618,7 +618,7 @@ class Api:
 
     def handoff_choose_receiver(self) -> dict:
         def run() -> dict:
-            path = self._require_native().choose_open_file(("Plug-in list (*.handoffplugins)",))
+            path = self._require_native().choose_open_file(("Handoff plugin list (*.handoffplugins)",))
             if not path:
                 return _ok(cancelled=True)
             return self.handoff_open_paths([path])
