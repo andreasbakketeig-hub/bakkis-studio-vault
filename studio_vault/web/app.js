@@ -24,6 +24,14 @@ const ui = {
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
+// Optional children are written as `cond ? el(…) : null` everywhere. el() skips them; make append() and
+// replaceChildren() skip them too, or the DOM inserts the text "null".
+const skipEmpty = (kids) => kids.flat().filter((c) => c !== null && c !== undefined && c !== false);
+for (const name of ["append", "replaceChildren"]) {
+  const native = Element.prototype[name];
+  Element.prototype[name] = function (...kids) { return native.apply(this, skipEmpty(kids)); };
+}
+
 function el(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
@@ -33,10 +41,7 @@ function el(tag, attrs = {}, ...children) {
     else if (k.startsWith("on")) node.addEventListener(k.slice(2), v);
     else node.setAttribute(k, v === true ? "" : v);
   }
-  for (const c of children.flat()) {
-    if (c === null || c === undefined || c === false) continue;
-    node.append(c instanceof Node ? c : document.createTextNode(String(c)));
-  }
+  node.append(...skipEmpty(children).map((c) => (c instanceof Node ? c : document.createTextNode(String(c)))));
   return node;
 }
 
@@ -860,8 +865,9 @@ function renderNewMac() {
   const all = [...c.groups.flatMap((g) => g.items), ...c.hardware, ...(c.content || [])];
   const missing = all.filter((i) => !i.done).length;
   const filters = [["all", "All"], ["missing", `Missing ${num(missing)}`], ["done", `Done ${num(c.done_count)}`]];
-  const q = nm.q.trim().toLowerCase();
-  const hit = (g, i) => !q || i.name.toLowerCase().includes(q) || (g && g.name.toLowerCase().includes(q));
+  // Read the search box each time: typing re-renders the groups only, not this function.
+  const query = () => nm.q.trim().toLowerCase();
+  const hit = (g, i) => { const q = query(); return !q || i.name.toLowerCase().includes(q) || (g && g.name.toLowerCase().includes(q)); };
 
   const toolbar = el("div", { class: "toolbar" },
     el("div", { class: "chips", role: "group", "aria-label": "Show" }, filters.map(([k, label]) =>
@@ -894,7 +900,7 @@ function renderNewMac() {
           el("span", {}, g.name), el("span", { class: "done-count" }, `✓ ${g.done_count} of ${g.items.length}`)));
         continue;
       }
-      const expanded = nm.open.has(g.key) || q;
+      const expanded = nm.open.has(g.key) || query();
       const visible = expanded ? items : items.slice(0, 4);
       cards.push(el("section", { class: "card group" },
         el("div", { class: "group-head" }, el("h2", {}, g.name), el("span", { class: "muted", style: "font-size: var(--fs-s)" }, `${num(g.done_count)} of ${num(g.items.length)} done`)),
@@ -925,7 +931,7 @@ function renderNewMac() {
         el("div", { class: "group-head" }, el("h2", {}, "Already done"), el("span", { class: "done-count" }, `✓ ${doneCards.length} vendors`)),
         el("div", { class: "done-grid" }, doneCards)));
     }
-    if (!cards.length) cards.push(el("div", { class: "empty" }, nm.filter === "missing" && !q ? "Everything is back. Nice." : "Nothing matches."));
+    if (!cards.length) cards.push(el("div", { class: "empty" }, nm.filter === "missing" && !query() ? "Everything is back. Nice." : "Nothing matches."));
     box.replaceChildren(...cards);
   }
 }

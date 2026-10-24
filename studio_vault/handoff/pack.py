@@ -114,7 +114,7 @@ def handoff_text(live_set: LiveSet, report: Report, version_name: str, note: str
         f"Live Set:       {version_name}.als (was {live_set.name}.als)",
         f"Live version:   {live_set.live_version or 'unknown'}",
         f"Tempo:          {live_set.tempo:g} BPM" if live_set.tempo else "Tempo:          unknown",
-        f"Tracks:         {len([t for t in live_set.tracks if t.kind != 'main'])}",
+        f"Tracks:         {live_set.track_count} (Main not counted)",
         "",
         "WHAT CHANGED",
         "------------",

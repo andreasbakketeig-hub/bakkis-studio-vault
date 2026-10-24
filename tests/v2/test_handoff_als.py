@@ -129,3 +129,10 @@ def test_reader_never_writes(project):
     stat = project.stat()
     als.read(project)
     assert project.read_bytes() == before and project.stat().st_mtime_ns == stat.st_mtime_ns
+
+
+def test_track_count_leaves_out_main(tmp_path):
+    from tests.v2.handoff_fixtures import live_set, track, write_set
+    path = write_set(tmp_path / "P" / "Song.als", live_set(track("AudioTrack", "A") + track("MidiTrack", "B")))
+    s = als.read(path)
+    assert len(s.tracks) == 3 and s.track_count == 2

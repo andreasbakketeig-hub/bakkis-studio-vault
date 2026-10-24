@@ -662,7 +662,7 @@ class Api:
             self._handoff_initials = handoff_pack.user_initials()
         return _ok(receiver=receiver, report={
             "set_name": r.set_name, "set_path": snap.scrub_path(r.set_path), "live_version": r.live_version,
-            "tempo": r.tempo, "level": r.level, "can_pack": r.can_pack, "tracks": len(live_set.tracks),
+            "tempo": r.tempo, "level": r.level, "can_pack": r.can_pack, "tracks": live_set.track_count,
             "findings": [asdict(f) for f in r.findings], "plugins": r.plugins, "frozen_tracks": r.frozen_tracks,
             "other_sets": handoff_als.other_sets(live_set),
             "suggested_name": handoff_pack.suggest_version_name(live_set, self._handoff_initials),

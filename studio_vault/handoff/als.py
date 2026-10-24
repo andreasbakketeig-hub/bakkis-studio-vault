@@ -94,6 +94,11 @@ class LiveSet:
         return Path(self.path).parent
 
     @property
+    def track_count(self) -> int:
+        """Audio, MIDI, group and return tracks; the Main track is not counted."""
+        return sum(1 for t in self.tracks if t.kind not in ("main", "prehear"))
+
+    @property
     def plugins(self) -> list[PluginUse]:
         seen: dict[tuple[str, str], PluginUse] = {}
         for t in self.tracks:
