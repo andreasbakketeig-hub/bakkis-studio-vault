@@ -65,6 +65,16 @@ The app is signed with the hardened runtime (`packaging/entitlements.plist` allo
 2. Run `./build_mac_app.sh`.
 3. Test the app from `dist/`, ideally on a second Mac or a fresh user account without your settings.
 4. On GitHub: **Releases → Draft a new release**, tag `v2.0.0`, attach `dist/BAKKIS-STUDIO-VAULT-2.0.0.zip`, and write what is new.
+5. Publish it (not as a pre-release). Installed apps see it at their next launch.
+
+### How the in-app update works
+
+At startup the app asks `api.github.com/repos/andreasbakketeig-hub/bakkis-studio-vault/releases/latest` once (Settings › *Check for new versions*). Drafts and pre-releases are ignored. *Update now* then needs:
+
+- an asset named `BAKKIS-STUDIO-VAULT-<version>.zip` (what `build_mac_app.sh` makes); GitHub publishes its SHA-256 and the download is checked against it,
+- inside it one `.app` with bundle id `com.bakkis.studio-vault` and `CFBundleShortVersionString` equal to the tag without `v`.
+
+The app is unpacked next to the installed one, swapped in after the app quits (the old one comes back if the swap fails), and reopened. When the app runs from a translocated location (opened straight from Downloads) or a folder it cannot write to, it offers *Download* instead. Test against a local file with `BAKKIS_UPDATE_API=file:///path/release.json`.
 
 ## Troubleshooting
 

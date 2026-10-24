@@ -73,6 +73,7 @@ class Settings:
     extra_plugin_folders: list[str] = field(default_factory=list)
     legacy_import_done: bool = False
     welcome_seen: bool = False          # the "Hi, I'm BAKKIS" card, once on first launch
+    check_for_updates: bool = True      # one request to GitHub Releases at startup
 
 
 def normalize_settings(raw: dict) -> Settings:

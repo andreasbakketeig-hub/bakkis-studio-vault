@@ -19,6 +19,7 @@ const ui = {
   ho: { mode: "send", data: null, exported: null, open: new Set(), packOpen: false, name: null, note: "", job: null },
   inv: { id: "", data: null, tab: "plugins", q: "", fmt: "", kind: "", vendor: "", arch: "", sort: "name", dir: 1 },
   about: null,
+  update: null,           // last api.check_update()
 };
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -53,10 +54,11 @@ const svg = (paths, cls = "") => {
 };
 const searchIcon = () => svg(["M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14z", "M20 20l-3.5-3.5"]);
 
-function toast(text, level = "ok") {
-  const t = el("div", { class: `toast ${level}`, role: level === "error" ? "alert" : "status" }, text);
+function toast(text, level = "ok", action = null, ms = 0) {
+  const t = el("div", { class: `toast ${level}`, role: level === "error" ? "alert" : "status" }, text,
+    action ? el("button", { class: "link", style: "margin-left: 12px", onclick: () => { t.remove(); action.fn(); } }, action.label) : null);
   $("#toasts").append(t);
-  setTimeout(() => t.remove(), level === "error" ? 7000 : 4000);
+  setTimeout(() => t.remove(), ms || (level === "error" ? 7000 : 4000));
 }
 
 async function call(method, ...args) {
@@ -1165,9 +1167,14 @@ function renderSettings() {
         el("button", { class: "link", onclick: async () => { const r = await call("remove_plugin_folder", f); if (r.ok) { ui.st.settings = r.settings; renderSettings(); } } }, "Remove"))),
       el("button", { class: "btn small", style: "align-self: flex-start", onclick: async () => {
         const r = await call("add_plugin_folder"); if (r.ok && !r.cancelled) { ui.st.settings = r.settings; renderSettings(); } } }, "Add folder…")),
+    el("div", { class: "label", style: "margin-top: 28px" }, "UPDATES"),
+    toggle("check_for_updates", "Check for new versions", "One request to GitHub at startup. Nothing about you or your studio is sent."),
     el("div", { class: "label", style: "margin-top: 28px" }, "ABOUT"),
     el("p", { style: "margin: 8px 0 16px", class: "soft" }, `${a.app_name} ${a.version} · macOS ${a.macos}`, el("br"),
       el("span", { class: "muted", style: "font-size: var(--fs-s)" }, "Free and open source. Made by BAKKIS, DJ and producer from Norway.")),
+    ui.update && ui.update.newer ? el("button", { class: "btn small", style: "margin-bottom: 16px",
+      onclick: () => { closeSettings(); ui.update.can_install ? installUpdate() : call("open_url", ui.update.url); } },
+      `Version ${ui.update.latest} is available: ${ui.update.can_install ? "update now" : "download"}`) : null,
     el("button", { class: "lk", onclick: () => { closeSettings(); showHello(); } }, el("span", {}, "Why I built this"), el("span", { class: "muted" }, "›")),
     link("bakkis.com", a.links.website),
     link("Instagram", a.links.instagram),
@@ -1189,7 +1196,7 @@ function renderWelcome() {
     el("p", { class: "lead" }, "See every plug-in, music app and piece of gear on this Mac, keep snapshots over time, and get a checklist when you set up a new one."),
     el("div", { class: "points" },
       point(["M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z", "M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"], "Read-only.", "It never moves, changes or deletes your plug-ins."),
-      point(["M6 11h12a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2z", "M8 11V7a4 4 0 0 1 8 0v4"], "Private.", "Nothing leaves your Mac. No account, no cloud."),
+      point(["M6 11h12a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2z", "M8 11V7a4 4 0 0 1 8 0v4"], "Private.", "Nothing about your studio leaves your Mac. No account, no cloud."),
       point(["M13 2L4 14h7l-1 8 9-12h-7z"], "Fast.", "A full scan takes a few seconds.")),
     el("div", { class: "actions" },
       el("button", { class: "btn primary", onclick: () => { w.classList.add("hidden"); show("studio"); startScan(); } }, "Scan this Mac"),
@@ -1305,4 +1312,49 @@ window.addEventListener("pywebviewready", async () => {
   if (!ui.st.has_snapshots && !ui.st.current && ui.st.scan.status !== "running") renderWelcome();
   else if (ui.st.settings.scan_on_launch && ui.st.scan.status !== "running") startScan();
   if (!ui.st.settings.welcome_seen) showHello();
+  if (ui.st.settings.check_for_updates) setTimeout(checkForUpdate, 4000);
 });
+
+// ── Updates ──────────────────────────────────────────────────────────────────
+
+/** One request to GitHub Releases per launch; silent unless a newer version exists. */
+async function checkForUpdate() {
+  try {
+    const r = await api().check_update();
+    ui.update = r;
+    if (r.ok && r.newer && r.url) {
+      const action = r.can_install ? { label: "Update now", fn: installUpdate } : { label: "Download", fn: () => call("open_url", r.url) };
+      toast(`${ui.st.app_name} ${r.latest} is available.`, "ok", action, 15000);
+    }
+  } catch (_) { /* never bother the user about this */ }
+}
+
+/** One-click update: confirm, download + verify in the background, then restart into the new version. */
+async function installUpdate() {
+  const u = ui.update;
+  if (!u || !u.newer) return;
+  if (!u.can_install) {
+    toast(u.install_problem || "Download the new version from GitHub.", "warning", { label: "Download", fn: () => call("open_url", u.url) }, 8000);
+    return;
+  }
+  const ok = await modal({ title: `Update to ${u.latest}?`, confirmLabel: "Update",
+    text: "The new version downloads in the background and is checked before anything changes. Then the app restarts. Your snapshots, checklists and settings stay." });
+  if (!ok) return;
+  const fail = (msg) => toast(`${msg} You can also download it from GitHub.`, "error", { label: "Download", fn: () => call("open_url", u.url) }, 10000);
+  const start = await api().update_install();
+  if (!start.ok) return fail(start.error);
+  let last = -1;
+  for (;;) {
+    await new Promise((r) => setTimeout(r, 400));
+    const st = await api().update_status();
+    if (st.status === "error") return fail(st.error || "The update failed.");
+    if (st.status === "ready") break;
+    if (st.status === "unpacking") { if (last < 100) { last = 100; toast(`Checking ${u.latest}…`, "ok", null, 3000); } continue; }
+    const pct = Math.round((st.progress || 0) * 100);
+    if (pct >= last + 25) { last = pct; toast(`Downloading ${u.latest}… ${pct}%`, "ok", null, 2500); }
+  }
+  toast(`Restarting into ${u.latest}…`, "ok", null, 5000);
+  await new Promise((r) => setTimeout(r, 600));
+  const res = await api().update_restart();
+  if (!res.ok) fail(res.error);
+}

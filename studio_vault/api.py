@@ -26,7 +26,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Callable, Protocol
 
-from studio_vault import APP_NAME, __version__, checklist, config, content, leave, projects, report
+from studio_vault import APP_NAME, __version__, checklist, config, content, leave, projects, report, updater, updates
 from studio_vault.handoff import als as handoff_als, check as handoff_check, pack as handoff_pack, pluginlist
 from studio_vault import snapshot as snap
 from studio_vault.compare import compare, compare_versions, side_by_side
@@ -58,6 +58,7 @@ class Native(Protocol):
     def reveal_in_finder(self, path: str) -> None: ...
     def open_url(self, url: str) -> None: ...
     def move_to_trash(self, path: str) -> None: ...
+    def quit_app(self) -> None: ...
     def copy_to_clipboard(self, text: str) -> None: ...
 
 
@@ -103,6 +104,8 @@ class Api:
         self._pack_job: dict[str, Any] = {"status": SCAN_IDLE, "done": 0, "total": 0}
         self._pack_thread: threading.Thread | None = None
         self._pack_cancel = threading.Event()
+        self._update_result: dict | None = None
+        self._updater = updater.Installer(updater.app_bundle())
         config.ensure_data_dirs()
         if not self._settings.legacy_import_done:
             snap.import_legacy()
@@ -176,7 +179,7 @@ class Api:
 
     def set_settings(self, changes: dict) -> dict:
         with self._lock:
-            allowed = {"scan_on_launch", "auto_save_snapshot", "extra_plugin_folders", "welcome_seen"}
+            allowed = {"scan_on_launch", "auto_save_snapshot", "extra_plugin_folders", "welcome_seen", "check_for_updates"}
             picked = {k: v for k, v in (changes or {}).items() if k in allowed}
             merged = {**asdict(self._settings), **picked}
             self._settings = config.normalize_settings(merged)
@@ -804,6 +807,43 @@ class Api:
             self._require_native().open_url(url)
             return _ok()
         return self._guard(run)
+
+    # ── updates (GitHub Releases; only when the setting is on) ────────────────
+
+    def check_update(self) -> dict:
+        """Ask GitHub Releases once per launch whether a newer version exists. Nothing else is sent."""
+        if not self._settings.check_for_updates:
+            return _ok(current=__version__, error="disabled")
+        if self._update_result is None:
+            self._update_result = updates.check()
+        r = {k: v for k, v in self._update_result.items() if k != "release"}
+        if r.get("newer"):
+            problem = updater.install_problem(self._updater.bundle)
+            r.update(can_install=problem is None, install_problem=problem)
+        return _ok(**r)
+
+    def update_install(self) -> dict:
+        """Download and verify the newer version in the background (the UI polls update_status)."""
+        r = self._update_result or {}
+        if not r.get("newer"):
+            return _fail("No newer version to install.")
+        try:
+            return _ok(**self._updater.start(r.get("release") or {}, r["latest"]))
+        except updater.UpdateError as exc:
+            return _fail(str(exc))
+
+    def update_status(self) -> dict:
+        return _ok(**self._updater.snapshot())
+
+    def update_restart(self) -> dict:
+        """Swap in the downloaded version and quit; the helper reopens the app once this process has exited."""
+        try:
+            self._updater.restart()
+        except updater.UpdateError as exc:
+            return _fail(str(exc))
+        if self._native is not None:
+            threading.Timer(0.3, self._native.quit_app).start()   # let this response reach the page first
+        return _ok(**self._updater.snapshot())
 
     def _shutdown(self) -> None:
         self._cancel.set()

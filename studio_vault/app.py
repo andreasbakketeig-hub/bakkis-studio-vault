@@ -91,6 +91,10 @@ class NativeBridge:
 
     # ── Events to the page ────────────────────────────────────────────────────
 
+    def quit_app(self) -> None:
+        """Close the window (used by the updater); main() then returns and the process exits."""
+        self.window.destroy()
+
     def emit(self, event: str, data: Any) -> None:
         self.window.evaluate_js(
             f"window.vault && vault.onEvent({json.dumps(event)}, {json.dumps(data)})")

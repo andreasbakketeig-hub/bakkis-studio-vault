@@ -53,6 +53,9 @@ class FakeNative:
         self.trashed.append(path)
         Path(path).unlink()
 
+    def quit_app(self):
+        self.quit = True
+
 
 PLUGINS = [Plugin("Serum", "VST3", "/Users/x/Library/Audio/Plug-Ins/VST3/Serum.vst3", "1.36", "Xfer Records",
                   "com.xferrecords.Serum", 100, "2026-01-01", "Instrument"),
@@ -548,3 +551,30 @@ def test_handoff_pack_refuses_red(vault, native, tmp_path):
     res = vault.handoff_pack("Song_v01", "note")
     assert res["ok"] is False and "red" in res["error"]
     assert not (tmp_path / "x.zip").exists()
+
+
+def test_check_update_respects_setting(vault):
+    with patch.object(api_mod.updates, "check") as check:
+        vault.set_settings({"check_for_updates": False})
+        assert vault.check_update()["error"] == "disabled"
+        check.assert_not_called()
+
+
+def test_check_update_once_and_install_problem(vault):
+    result = {"current": "2.0.0", "latest": "2.1.0", "newer": True, "url": "https://github.com/x",
+              "release": {"assets": []}}
+    with patch.object(api_mod.updates, "check", return_value=result) as check:
+        r = vault.check_update()
+        vault.check_update()
+    assert check.call_count == 1
+    assert r["ok"] and r["newer"] and "release" not in r
+    assert r["can_install"] is False and "source" in r["install_problem"]     # tests run from source
+    assert vault.update_install()["ok"] is False
+    assert vault.update_restart()["ok"] is False
+
+
+def test_no_update_means_nothing_to_install(vault):
+    with patch.object(api_mod.updates, "check", return_value={"current": "2.0.0", "error": "offline"}):
+        assert "newer" not in vault.check_update()
+    assert vault.update_install()["error"] == "No newer version to install."
+    assert vault.update_status()["status"] == "idle"

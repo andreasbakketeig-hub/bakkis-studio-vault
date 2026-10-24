@@ -41,7 +41,7 @@ hardware) as a **snapshot over time** with a **new-Mac migration checklist**. Th
 - Online update checking, version databases, shop links.
 - Uninstall, enable/disable, quarantine, cleanup recommendations. **v2 never moves, changes or deletes plug-ins.**
 - Plug-in Health, Plugin Insights, the v1 Studio Overview dashboard, the 1,500-line Settings view.
-- Any network traffic except opening links in the browser. No accounts, no cloud sync, no analytics.
+- Any network traffic except opening links in the browser and the update check (one GitHub Releases request at startup, can be turned off). No accounts, no cloud sync, no analytics.
 
 ## Decisions (approved by Andreas, 2026-10-23)
 
@@ -100,9 +100,11 @@ rest of the app, so it can become its own app.
 
 - Done: `.als` reader (read-only), receiver's one-click plug-in list export (`.handoffplugins`), checks with a
   traffic light (red / yellow / green), Handoff screen (send + receive), drag and drop of `.als` and lists.
-- Next (V1): packing only on green/yellow: version name (`Track_v08_AB`), leave out `Backup/`, `.asd` and
-  `.DS_Store` **in the zip** (never delete in the user's folder), `HANDOFF.txt` (version, tempo, plug-ins,
-  frozen tracks, required "What did you change?" note), one zip; pick the main set when there are several.
+- Done (V1 packing, `handoff/pack.py`): only on green/yellow; version name suggested from the folder
+  (`Track_v08_AB`, initials from the Mac account); main set picked when there are several; `Backup/`, `.asd`,
+  `.DS_Store`, `._*` and other set versions left out **of the zip** (nothing in the user's folder is changed);
+  `HANDOFF.txt` (date, version, tempo, plug-ins per track, frozen tracks, Max for Live, Packs, open points,
+  required "What did you change?" note); one zip written to a `.part` file first, saved outside the project.
 - Reminders shown (not visible in the file): libraries inside plug-ins, reference bounce, stems.
 - V2: diff between versions of a set.
 

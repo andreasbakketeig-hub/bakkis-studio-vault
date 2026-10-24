@@ -12,7 +12,7 @@ Made by [BAKKIS](https://bakkis.com), DJ and producer from Norway.
 - Compare two Macs side by side, for example your studio Mac and your touring laptop: what each one lacks, per vendor
 - Lists the presets, patches and user libraries worth backing up (Logic, Ableton User Library, Native Instruments, FabFilter, Splice, vendor folders …) with their size
 - Checks Ableton Live projects: which plug-ins each set needs, and which are missing on this Mac or on another Mac (for example your touring laptop)
-- **Handoff**: check an Ableton Live set before sending it to a collaborator (samples outside the project, plug-ins they lack, Max for Live, Packs, Live version, frozen tracks) with a traffic light; the receiver exports their plug-in list in one click
+- **Handoff**: check an Ableton Live set before sending it to a collaborator (samples outside the project, plug-ins they lack, Max for Live, Packs, Live version, frozen tracks) with a traffic light; the receiver exports their plug-in list in one click; pack it all into one zip with a HANDOFF.txt
 - Flags Intel-only plug-ins (they only load under Rosetta on Apple Silicon) and plug-ins that need a newer macOS, read straight from the files, no online database
 - **Read-only**: it never moves, changes or deletes a plug-in, and nothing leaves your Mac
 
@@ -80,7 +80,7 @@ Hardware is on the list too, with its channels and sample rate: connect each dev
 | **Compare** | Two Macs (or two snapshots of one Mac) side by side, grouped by vendor: what is only on A, only on B, or installed in a different version or with other formats. |
 | **New Mac** | *On the new Mac*: the checklist built from a snapshot of the old Mac. Filter by missing or done, search, tick, print or export. *Before you leave the old Mac*: export the snapshot and deactivate licenses tied to that computer. |
 | **Projects** | Check Ableton Live sets (pick files or a whole folder, or drop `.als` files on the window) against this Mac or another Mac's snapshot: which projects open with every plug-in, which plug-ins are missing across them, and where a project uses a format (AU, VST, VST3) that is not installed. |
-| **Handoff** | *Send a project*: pick a Live Set and load the receiver's plug-in list; a traffic light shows what will be missing for them (red), what to look at (yellow) or that it is ready (green), with a freeze suggestion per track. *Receive projects*: export your own plug-in list (`.handoffplugins`, no paths or personal data) in one click. Packing into one zip comes next. |
+| **Handoff** | *Send a project*: pick a Live Set and load the receiver's plug-in list; a traffic light shows what will be missing for them (red), what to look at (yellow) or that it is ready (green), with a freeze suggestion per track. *Receive projects*: export your own plug-in list (`.handoffplugins`, no paths or personal data) in one click. *Pack…* (green or yellow only) writes one zip with a suggested version name (`Track_v08_AB`), a `HANDOFF.txt` with your required change note, and without `Backup/`, `.asd` and `.DS_Store`. Your project folder is never changed. |
 | **Inventory** | Every plug-in (one row per product, all formats together), app and device. Filter by type (instrument, effect, MIDI), vendor and format; show in Finder; copy the path; export as CSV. |
 | **Snapshots** | Every saved scan of this Mac and the ones you imported from other Macs. Rename, export, compare with this Mac, or move to Trash. |
 
@@ -99,7 +99,8 @@ Press **⌘1–⌘7** to switch screens. Settings (the gear icon) has scanning o
 
 ## Privacy
 
-- The app works entirely on your Mac. It makes no network requests at all.
+- The app works entirely on your Mac. The only network request is one check of GitHub Releases at startup for a newer version (turn it off in Settings). Nothing about you or your studio is sent.
+- **Updates in one click:** when a new version is out, *Update now* downloads it, checks its SHA-256 against the checksum GitHub publishes, swaps the app and reopens it. Snapshots, checklists and settings stay. Running from source? Use `git pull`.
 - Snapshot files are made to be shared: paths are stored as `~/…` without your macOS user name, and the Mac's hardware id is replaced by a one-way hash. No serials, passwords or license keys are ever stored.
 - Links (download pages, Follow BAKKIS, Support, Report a problem) open in your browser or mail app.
 
