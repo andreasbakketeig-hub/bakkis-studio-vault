@@ -20,13 +20,14 @@ import datetime
 import os
 import platform
 import threading
+import time
 import urllib.parse
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Callable, Protocol
 
 from studio_vault import APP_NAME, __version__, checklist, config, content, leave, projects, report
-from studio_vault.handoff import als as handoff_als, check as handoff_check, pluginlist
+from studio_vault.handoff import als as handoff_als, check as handoff_check, pack as handoff_pack, pluginlist
 from studio_vault import snapshot as snap
 from studio_vault.compare import compare, compare_versions, side_by_side
 from studio_vault.scanners.apps import scan_music_apps
@@ -98,6 +99,10 @@ class Api:
         self._projects_cancel = threading.Event()
         self._handoff_set: str = ""
         self._handoff_receiver: pluginlist.PluginList | None = None
+        self._handoff_initials: str | None = None
+        self._pack_job: dict[str, Any] = {"status": SCAN_IDLE, "done": 0, "total": 0}
+        self._pack_thread: threading.Thread | None = None
+        self._pack_cancel = threading.Event()
         config.ensure_data_dirs()
         if not self._settings.legacy_import_done:
             snap.import_legacy()
@@ -526,6 +531,7 @@ class Api:
 
     def projects_cancel(self) -> dict:
         self._projects_cancel.set()
+        self._pack_cancel.set()
         return _ok()
 
     def _start_projects(self, paths: list[str] | None = None, folder: str = "") -> dict:
@@ -649,11 +655,96 @@ class Api:
         except handoff_als.AlsError as exc:
             return _fail(str(exc))
         r = handoff_check.check(live_set, rec)
+        if self._handoff_initials is None:
+            self._handoff_initials = handoff_pack.user_initials()
         return _ok(receiver=receiver, report={
             "set_name": r.set_name, "set_path": snap.scrub_path(r.set_path), "live_version": r.live_version,
             "tempo": r.tempo, "level": r.level, "can_pack": r.can_pack, "tracks": len(live_set.tracks),
             "findings": [asdict(f) for f in r.findings], "plugins": r.plugins, "frozen_tracks": r.frozen_tracks,
+            "other_sets": handoff_als.other_sets(live_set),
+            "suggested_name": handoff_pack.suggest_version_name(live_set, self._handoff_initials),
         })
+
+    def handoff_use_set(self, name: str) -> dict:
+        """Switch to another .als in the same project folder (pick the main version)."""
+        with self._lock:
+            current = self._handoff_set
+        if not current:
+            return _fail("Choose a Live Set first.")
+        other = Path(current).parent / Path(str(name)).name
+        if other.suffix.lower() != ".als" or not other.is_file():
+            return _fail("That Live Set is no longer in the project folder.")
+        with self._lock:
+            self._handoff_set = str(other)
+        return self.handoff_report()
+
+    def handoff_pack(self, version_name: str, note: str) -> dict:
+        """Ask where to save, then zip the project on a worker thread (progress: event "pack")."""
+        def run() -> dict:
+            if not (note or "").strip():
+                raise ApiError('Write what you changed ("What did you change?") first.')
+            name = handoff_pack.clean_version_name(version_name)
+            with self._lock:
+                set_path, rec = self._handoff_set, self._handoff_receiver
+                if self._pack_job["status"] == SCAN_RUNNING:
+                    raise ApiError("Already packing.")
+            if not set_path:
+                raise ApiError("Choose a Live Set first.")
+            live_set = handoff_als.read(set_path)
+            report_ = handoff_check.check(live_set, rec)
+            if not report_.can_pack:
+                raise ApiError("Fix the red points first: something would be missing for the receiver.")
+            dest = self._require_native().choose_save_file(f"{name}.zip", ("Zip archive (*.zip)",))
+            if not dest:
+                return _ok(cancelled=True)
+            with self._lock:
+                self._pack_cancel.clear()
+                self._pack_job = {"status": SCAN_RUNNING, "done": 0, "total": 0}
+                self._pack_thread = threading.Thread(
+                    target=self._run_pack, args=(live_set, report_, dest, name, note), name="pack", daemon=True)
+                self._pack_thread.start()
+                return _ok(job=dict(self._pack_job))
+        try:
+            return self._guard(run)
+        except (handoff_als.AlsError, handoff_pack.PackError) as exc:
+            return _fail(str(exc))
+
+    def _run_pack(self, live_set: handoff_als.LiveSet, report_: handoff_check.Report, dest: str,
+                  name: str, note: str) -> None:
+        last = [0.0]
+
+        def progress(done: int, total: int) -> None:
+            with self._lock:
+                self._pack_job.update(done=done, total=total)
+                data = dict(self._pack_job)
+            now = time.monotonic()
+            if now - last[0] >= 0.2 or done == total:
+                last[0] = now
+                self._emit("pack", data)
+        try:
+            res = handoff_pack.pack(live_set, report_, dest, name, note, sender=self._handoff_initials or "",
+                                    progress=progress, cancelled=self._pack_cancel.is_set)
+            with self._lock:
+                self._pack_job.update(status=SCAN_DONE, path=res.zip_path, files=res.files, bytes=res.bytes)
+                data = dict(self._pack_job)
+        except handoff_pack.PackError as exc:
+            status = SCAN_CANCELLED if self._pack_cancel.is_set() else SCAN_FAILED
+            with self._lock:
+                self._pack_job.update(status=status, error=str(exc))
+                data = dict(self._pack_job)
+        except Exception as exc:  # noqa: BLE001 - report, never crash the worker
+            with self._lock:
+                self._pack_job.update(status=SCAN_FAILED, error=f"Could not pack the project: {exc}")
+                data = dict(self._pack_job)
+        self._emit("pack", data)
+
+    def handoff_pack_cancel(self) -> dict:
+        self._pack_cancel.set()
+        return _ok()
+
+    def handoff_pack_status(self) -> dict:
+        with self._lock:
+            return _ok(job=dict(self._pack_job))
 
     def export_checklist(self, source_id: str, fmt: str = "html") -> dict:
         def run() -> dict:
@@ -717,6 +808,7 @@ class Api:
     def _shutdown(self) -> None:
         self._cancel.set()
         self._projects_cancel.set()
+        self._pack_cancel.set()
         thread = self._scan_thread
         if thread is not None:
             thread.join(timeout=2)

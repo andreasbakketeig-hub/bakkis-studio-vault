@@ -504,3 +504,47 @@ def test_content_search_only_uses_vendors_on_this_mac(vault, scanners):
         run_scan(vault)
     assert "Xfer Records" in seen["names"] and "FabFilter" in seen["names"]
     assert "Waves" not in seen["names"] and "Native Instruments" not in seen["names"]
+
+
+def test_handoff_pack_flow(vault, native, tmp_path):
+    import zipfile
+    from tests.v2.handoff_fixtures import file_ref, live_set, sample, touch, track, write_set
+    proj = tmp_path / "Song Project"
+    touch(proj / "Samples" / "kick.wav")
+    touch(proj / "Backup" / "old.als")
+    kick = track("AudioTrack", "Drums", sample(file_ref(3, "Samples/kick.wav")))
+    als_path = write_set(proj / "Song_v03.als", live_set(kick))
+    write_set(proj / "Song_v02.als", live_set(""))
+
+    with patch.object(api_mod.handoff_pack, "user_initials", return_value="AB"):
+        rep = vault.handoff_open_paths([str(als_path)])["report"]
+    assert rep["suggested_name"] == "Song_v04_AB" and rep["other_sets"] == ["Song_v02.als"]
+    assert vault.handoff_use_set("Song_v02.als")["report"]["set_name"] == "Song_v02"
+    assert vault.handoff_use_set("../x.als")["ok"] is False
+    vault.handoff_use_set("Song_v03.als")
+
+    assert "What did you change" in vault.handoff_pack("Song_v04_AB", "  ")["error"]
+    native.save_result = None
+    assert vault.handoff_pack("Song_v04_AB", "Chorus")["cancelled"] is True
+    native.save_result = str(tmp_path / "out" / "Song_v04_AB.zip")
+    assert native.last_default_name == "Song_v04_AB.zip"
+    assert vault.handoff_pack("Song_v04_AB", "Chorus")["ok"]
+    vault._pack_thread.join(timeout=10)
+    job = vault.handoff_pack_status()["job"]
+    assert job["status"] == "done" and job["path"] == native.save_result
+    with zipfile.ZipFile(job["path"]) as zf:
+        assert sorted(zf.namelist()) == ["Song_v04_AB Project/HANDOFF.txt", "Song_v04_AB Project/Samples/kick.wav",
+                                         "Song_v04_AB Project/Song_v04_AB.als"]
+        assert "Chorus" in zf.read("Song_v04_AB Project/HANDOFF.txt").decode()
+    assert vault._events[-1] == ("pack", job)
+
+
+def test_handoff_pack_refuses_red(vault, native, tmp_path):
+    from tests.v2.handoff_fixtures import file_ref, live_set, sample, track, write_set
+    als_path = write_set(tmp_path / "P" / "Song.als",
+                         live_set(track("AudioTrack", "Vox", sample(file_ref(1, "", "/nowhere/vox.wav")))))
+    vault.handoff_open_paths([str(als_path)])
+    native.save_result = str(tmp_path / "x.zip")
+    res = vault.handoff_pack("Song_v01", "note")
+    assert res["ok"] is False and "red" in res["error"]
+    assert not (tmp_path / "x.zip").exists()

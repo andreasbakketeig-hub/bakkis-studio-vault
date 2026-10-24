@@ -16,7 +16,7 @@ const ui = {
   newmac: { mode: "new", sourceId: "", picked: false, data: null, filter: "missing", q: "", open: new Set(), leave: null },
   cmp: { a: "", b: "", data: null, filter: "diff", q: "", open: new Set() },
   proj: { target: "", data: null, job: null, filter: "need", q: "", limit: 100 },
-  ho: { mode: "send", data: null, exported: null, open: new Set() },
+  ho: { mode: "send", data: null, exported: null, open: new Set(), packOpen: false, name: null, note: "", job: null },
   inv: { id: "", data: null, tab: "plugins", q: "", fmt: "", kind: "", vendor: "", arch: "", sort: "name", dir: 1 },
   about: null,
 };
@@ -630,7 +630,11 @@ async function loadHandoff() {
 
 async function handoffCall(method, ...args) {
   const res = await call(method, ...args);
-  if (res.ok && !res.cancelled && "report" in res) { ui.ho.data = res; ui.ho.open.clear(); }
+  if (res.ok && !res.cancelled && "report" in res) {
+    const before = ui.ho.data && ui.ho.data.report ? ui.ho.data.report.set_path : "";
+    ui.ho.data = res; ui.ho.open.clear();
+    if (!res.report || res.report.set_path !== before) { ui.ho.name = null; if (ui.ho.job && ui.ho.job.status !== "running") ui.ho.job = null; }
+  }
   renderHandoff();
   return res;
 }
@@ -684,7 +688,9 @@ function renderHandoff() {
     parts.push(el("div", { class: `card light ${r.level}`, role: "status" },
       el("span", { class: `dot ${r.level}`, "aria-hidden": "true" }),
       el("div", { style: "flex: 1" }, el("h2", {}, title), el("div", { class: "soft", style: "font-size: var(--fs-s)" }, `${sub} ${facts}`)),
-      el("button", { class: "btn primary", disabled: true, title: r.can_pack ? "Packing comes in the next update" : "Fix the red points first" }, "Pack…")));
+      el("button", { class: "btn primary", disabled: !r.can_pack, title: r.can_pack ? "Pack the project into one zip" : "Fix the red points first",
+        onclick: () => { H.packOpen = true; renderHandoff(); $("#pack-note")?.focus(); } }, "Pack…")));
+    if (r.can_pack && (H.packOpen || H.job)) parts.push(packCard(r));
     parts.push(el("section", { class: "card group", style: "margin-top: 12px" },
       r.findings.map((f) => {
         const open = H.open.has(f.key);
@@ -704,6 +710,52 @@ function renderHandoff() {
         el("div", { class: "item" }, el("span", { class: "name" }, el("b", {}, t), el("span", { class: "muted", style: "display: block; font-size: var(--fs-s)" }, x))))));
   }
   root.replaceChildren(...parts);
+}
+
+function packCard(r) {
+  const H = ui.ho;
+  const job = H.job;
+  const card = el("section", { class: "card pack", style: "margin-top: 12px", "aria-label": "Pack" });
+  if (job && job.status === "running") {
+    const pct = job.total ? Math.round((job.done / job.total) * 100) : 0;
+    card.append(el("h2", {}, "Packing…"),
+      el("div", { class: "meter", role: "progressbar", "aria-valuenow": String(pct), "aria-valuemin": "0", "aria-valuemax": "100", style: "margin-top: 16px" },
+        el("div", { style: `width: ${pct}%` })),
+      el("div", { style: "display: flex; justify-content: space-between; margin-top: 8px; font-size: var(--fs-s)" },
+        el("span", { class: "muted" }, job.total ? `${fmtBytes(job.done)} of ${fmtBytes(job.total)}` : "Starting…"),
+        el("button", { class: "link", onclick: () => call("handoff_pack_cancel") }, "Cancel")));
+    return card;
+  }
+  if (job && job.status === "done") {
+    card.append(el("h2", {}, "Packed"),
+      el("p", { class: "soft", style: "margin: 8px 0 0" }, `${plural(job.files, "file")} · ${fmtBytes(job.bytes)} (before zip). Send this one file to the receiver.`),
+      el("div", { class: "muted", style: "font-size: var(--fs-s); font-family: var(--mono); margin-top: 8px; overflow-wrap: anywhere" }, job.path),
+      el("div", { class: "actions" },
+        el("button", { class: "btn primary", onclick: () => call("reveal", job.path) }, "Show in Finder"),
+        el("button", { class: "btn small", onclick: () => { H.job = null; H.note = ""; H.name = null; H.packOpen = false; renderHandoff(); } }, "Done")));
+    return card;
+  }
+  const name = H.name ?? r.suggested_name;
+  const packBtn = el("button", { class: "btn primary", disabled: !H.note.trim(), onclick: async () => {
+    const res = await call("handoff_pack", H.name ?? r.suggested_name, H.note);
+    if (res.ok && !res.cancelled) { H.job = res.job; renderHandoff(); }
+  } }, "Pack zip…");
+  const sets = [`${r.set_name}.als`, ...r.other_sets];
+  card.append(el("h2", {}, "Pack for the receiver"),
+    el("p", { class: "soft", style: "margin: 8px 0 0; font-size: var(--fs-s)" },
+      "One zip with the project folder and a HANDOFF.txt. Left out: Backup folder, .asd files, .DS_Store and the other Live Set versions. Nothing in your project folder is changed or deleted."),
+    r.other_sets.length ? el("label", { class: "field" }, "Main version (the set the receiver opens)",
+      el("select", { class: "select", onchange: (e) => handoffCall("handoff_use_set", e.target.value) },
+        sets.map((n) => el("option", { value: n, selected: n === sets[0] }, n)))) : null,
+    el("label", { class: "field" }, "Version name",
+      el("input", { type: "text", value: name, spellcheck: "false", oninput: (e) => { H.name = e.target.value; } })),
+    el("label", { class: "field" }, el("span", {}, "What did you change? ", el("span", { class: "muted" }, "(required, goes in HANDOFF.txt)")),
+      el("textarea", { id: "pack-note", rows: "4", placeholder: "New chorus, re-recorded vocals, bass is now frozen …",
+        oninput: (e) => { H.note = e.target.value; packBtn.disabled = !H.note.trim(); } }, H.note)),
+    el("div", { class: "actions" }, packBtn,
+      el("button", { class: "btn small", onclick: () => { H.packOpen = false; renderHandoff(); } }, "Cancel")));
+  if (job && job.status !== "running" && job.error) card.append(el("p", { style: `margin: 12px 0 0; color: var(${job.status === "cancelled" ? "--warn" : "--danger"})` }, job.error));
+  return card;
 }
 
 // ── New Mac ──────────────────────────────────────────────────────────────────
@@ -1216,6 +1268,11 @@ window.vault = {
         if (ui.view === "projects") loadProjects();
         if (data.status === "done") toast("Projects checked.");
       } else if (ui.view === "projects") renderProjects();
+    } else if (event === "pack") {
+      ui.ho.job = data;
+      if (data.status === "done") toast("Project packed.");
+      else if (data.status === "failed") toast(data.error, "error");
+      if (ui.view === "handoff") renderHandoff();
     } else if (event === "dropped") {
       if (data.plugin_lists.length || (ui.view === "handoff" && data.als.length)) {
         ui.ho.mode = "send";

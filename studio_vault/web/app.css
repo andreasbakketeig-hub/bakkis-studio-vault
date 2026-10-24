@@ -162,6 +162,10 @@ select.select { background: var(--bg); border: 1px solid var(--line-strong); bor
 .dot.green { background: var(--ok); } .dot.yellow { background: var(--warn); } .dot.red { background: var(--danger); }
 .light.red { border-color: color-mix(in srgb, var(--danger) 55%, var(--line)); }
 .light.yellow { border-color: color-mix(in srgb, var(--warn) 55%, var(--line)); }
+.pack .field { display: block; margin-top: 16px; font-size: var(--fs-s); color: var(--soft); }
+.pack .field input, .pack .field textarea, .pack .field select { display: block; width: 100%; margin-top: 8px; background: var(--bg); border: 1px solid var(--line-strong); border-radius: 8px; padding: 8px 12px; color: var(--ink); font-size: var(--fs-m); -webkit-user-select: text; user-select: text; }
+.pack .field textarea { resize: vertical; font: inherit; font-size: var(--fs-m); }
+.pack .field input:focus, .pack .field textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 .light.green { border-color: color-mix(in srgb, var(--ok) 55%, var(--line)); }
 .finding { display: flex; gap: 12px; padding: 12px 0; border-top: 1px solid var(--line); }
 .finding:first-child { border-top: 0; }
