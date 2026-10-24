@@ -1,6 +1,6 @@
 # BAKKIS STUDIO VAULT v2 — rebuild plan
 
-Status: milestones 1–6 done, plus the six niche features from the competitor review (2026-10-24): Compare screen, Apple Silicon / macOS check, Before you leave the old Mac, Project check for Ableton Live, presets and user content, hardware details. Menu: My Studio, Compare, New Mac, Projects; Inventory and Snapshots under More. Next: milestone 7 (real two-Mac test), milestone 8 (merge, tag v2.0.0, release). Branch `v2-pywebview`.
+Status (2026-10-24): v2.0.0 merged to `main` and tagged; GitHub Release drafted (not published). Done: milestones 1–6, the six niche features from the competitor review, Handoff (check + packing), one-click updates. Left: milestone 7 (real two-Mac test), publishing the release (the repo must be public for downloads and the update check).
 Owner: Andreas (BAKKIS). Communicate with him in Norwegian; code, comments and commits in English.
 
 ## Goal

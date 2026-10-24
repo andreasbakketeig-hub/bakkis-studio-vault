@@ -4,7 +4,7 @@ Read `PLAN.md` first — it holds the v2 plan, scope, decisions and milestones.
 
 - Talk to Andreas in Norwegian. Code, comments, commit messages, UI and docs in English (no other UI languages).
 - v1 is `app/` + `main.py` (CustomTkinter). Keep it runnable until v2 ships; reuse its core scanners, not its UI.
-- v2 lives in `studio_vault/` on branch `v2-pywebview`. macOS only. Same setup as BAKKIS MUSIC SORTER v2.
+- v2 lives in `studio_vault/` on `main` (merged and tagged `v2.0.0` on 2026-10-24; v1 is tag `v1-final`). macOS only. Same setup as BAKKIS MUSIC SORTER v2.
   Run it with `.venv/bin/python -m studio_vault` or `Start BAKKIS Studio Vault.command`; build the .app with `./build_mac_app.sh` (see PACKAGING.md) (set `STUDIO_VAULT_DATA_DIR` to a temp dir to keep test runs out of real user data).
 - v2 is read-only: never move, change or delete plug-ins or apps. Writes go only to the app's data folder, the Keychain and user-chosen export files.
 - The only network request is the update check (`studio_vault/updates.py`, one GitHub Releases call at startup, setting `check_for_updates`); the installer (`updater.py`) runs only when the user clicks. Tests never touch the network: patch `updates.check`.
