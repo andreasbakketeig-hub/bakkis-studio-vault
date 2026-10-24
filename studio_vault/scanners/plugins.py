@@ -215,7 +215,7 @@ def scan_plugins(
             continue
         for bundle in _find_bundles(base_path, cancel, set()):
             key = str(bundle)
-            if key in seen:
+            if key in seen or is_helper_bundle(bundle):
                 continue
             seen.add(key)
             result.plugins.append(_read_plugin(bundle, cache))
@@ -250,6 +250,15 @@ def _find_bundles(root: Path, cancel: CancelFlag | None, visited: set[str]) -> l
         elif item.is_dir():
             found.extend(_find_bundles(item, cancel, visited))
     return found
+
+
+# iZotope installs a hidden helper next to each plug-in ("iZNectar3AUHook.component", "…AAXHook.aaxplugin").
+# They are not plug-ins anyone installs or loads, so they are left out.
+_HELPER_BUNDLE = re.compile(r"^iZ\w*(AU|AAX|VST3?)Hook$", re.IGNORECASE)
+
+
+def is_helper_bundle(bundle: Path) -> bool:
+    return _HELPER_BUNDLE.match(bundle.stem) is not None
 
 
 def _read_plugin(bundle: Path, cache: SizeCache) -> Plugin:

@@ -27,6 +27,11 @@ class TestScanPlugins:
         result = scan_plugins([str(tmp_path)])
         assert sorted(p.fmt for p in result.plugins) == ["AAX", "AU", "CLAP", "VST", "VST3"]
 
+    def test_skips_izotope_helper_bundles(self, tmp_path):
+        for name in ("iZNectar3AUHook.component", "iZNeutron3AAXHook.aaxplugin", "Nectar 3.component"):
+            make_bundle(tmp_path, name, _plist())
+        assert [p.name for p in scan_plugins([str(tmp_path)]).plugins] == ["Nectar 3"]
+
     def test_walks_vendor_subfolders(self, tmp_path):
         make_bundle(tmp_path / "Acme", "Comp.vst3", _plist())
         result = scan_plugins([str(tmp_path)])

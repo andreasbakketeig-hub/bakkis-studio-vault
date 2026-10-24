@@ -171,3 +171,15 @@ def test_hardware_details_and_control_app_reminder():
     assert big.warnings == ["Install SSL 360 to set it up."]
     new = _snap(id="new", apps=[SnapApp("SSL 360")])
     assert _item(cl.build(old, new, set()), "BiG SiX").warnings == []
+
+
+def test_older_version_here_is_back_with_a_hint():
+    new = _snap(id="new", plugins=[SnapPlugin("Serum", "VST3", "Xfer Records", "1.35"),
+                                   SnapPlugin("Serum", "AU", "Xfer Records", "1.35"),
+                                   SnapPlugin("Pro-Q 3", "VST3", "FabFilter", "3.10")],
+                apps=[SnapApp("Native Access", "Plugin Manager", "Native Instruments", "3.0")])
+    c = cl.build(OLD, new, manual_done=set())
+    serum = _item(c, "Serum")
+    assert serum.done and serum.warnings == ["Older version here (1.35); the old Mac had 1.36."]
+    assert _item(c, "Pro-Q 3").warnings == []                     # 3.10 is newer than 3.2
+    assert _item(c, "Native Access").warnings == ["Older version here (3.0); the old Mac had 3.1."]

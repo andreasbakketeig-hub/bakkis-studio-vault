@@ -171,8 +171,11 @@ def build(source: Snapshot, current: Snapshot, manual_done: set[str] | None = No
 
     # Plug-ins, one item per product.
     current_formats: dict[str, set[str]] = {}
+    current_versions: dict[str, list[str]] = {}
     for p in current.plugins:
         current_formats.setdefault(normalize_product_name(p.name), set()).add(p.fmt)
+        if p.version:
+            current_versions.setdefault(normalize_product_name(p.name), []).append(p.version)
 
     products: dict[str, list] = {}
     for p in source.plugins:
@@ -187,22 +190,25 @@ def build(source: Snapshot, current: Snapshot, manual_done: set[str] | None = No
         missing = formats - have
         status = STATUS_INSTALLED if not missing else (STATUS_PARTIAL if have else STATUS_MISSING)
         item_id = _item_id(KIND_PLUGIN, key)
+        version = _newest([c.version for c in copies])
+        warnings = compatibility_warnings(copies, current) if status != STATUS_INSTALLED else []
+        warnings += older_here(_newest(current_versions.get(key, [])), version) if have else []
         group_for(developer, bundle_id).items.append(ChecklistItem(
-            id=item_id, kind=KIND_PLUGIN, name=rep.name,
-            version=next((c.version for c in copies if c.version), ""),
+            id=item_id, kind=KIND_PLUGIN, name=rep.name, version=version,
             formats=_ordered_formats(formats), missing_formats=_ordered_formats(missing),
-            status=status, manual_done=item_id in manual,
-            warnings=compatibility_warnings(copies, current) if status != STATUS_INSTALLED else [],
+            status=status, manual_done=item_id in manual, warnings=warnings,
         ))
 
     # Apps.
-    current_apps = {a.name.lower() for a in current.apps}
+    current_apps = {a.name.lower(): a.version for a in current.apps}
     for a in source.apps:
         item_id = _item_id(KIND_APP, a.name)
+        here = a.name.lower() in current_apps
         group_for(a.developer).items.append(ChecklistItem(
             id=item_id, kind=KIND_APP, name=a.name, version=a.version, category=a.category,
-            status=STATUS_INSTALLED if a.name.lower() in current_apps else STATUS_MISSING,
+            status=STATUS_INSTALLED if here else STATUS_MISSING,
             manual_done=item_id in manual,
+            warnings=older_here(current_apps[a.name.lower()], a.version) if here else [],
         ))
 
     # Hardware: "connected and working on this Mac" means it shows up in the current scan.
@@ -241,6 +247,21 @@ def build(source: Snapshot, current: Snapshot, manual_done: set[str] | None = No
         source_id=source.id, source_name=source.name, source_created_at=source.created_at,
         groups=ordered, hardware=hardware, content=content_items,
     )
+
+
+def _newest(versions: list[str]) -> str:
+    newest = ""
+    for v in versions:
+        if v and (not newest or compare_versions(newest, v) == 1):
+            newest = v
+    return newest
+
+
+def older_here(here: str, old_mac: str) -> list[str]:
+    """A hint when this Mac has an older version than the old Mac had (it still counts as back)."""
+    if here and old_mac and compare_versions(here, old_mac) == 1:
+        return [f"Older version here ({here}); the old Mac had {old_mac}."]
+    return []
 
 
 def compatibility_warnings(copies: list, target: Snapshot) -> list[str]:
