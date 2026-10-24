@@ -460,6 +460,9 @@ class Api:
             if not dest:
                 return _ok(cancelled=True)
             out = snap.export(s, Path(dest))
+            if snapshot_id == "current" or s.id == self._this_mac_state().id:
+                # Exporting this Mac's latest snapshot is step 1 of "Before you leave".
+                checklist.set_done(leave.LEAVE_ID, leave.STEP_SNAPSHOT, True)
             return _ok(path=str(out))
         return self._guard(run)
 

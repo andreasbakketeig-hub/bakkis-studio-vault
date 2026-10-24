@@ -210,6 +210,8 @@ th button { background: none; border: 0; padding: 0; color: inherit; font-weight
 th.num, td.num { text-align: right; }
 td { padding: 8px 12px; border-bottom: 1px solid var(--line); }
 td.nw, td.num { white-space: nowrap; }
+/* Long version strings ("5.3.4 (R59) build 2021…") must not push Size off the right edge. */
+td.ver { white-space: nowrap; max-width: 112px; overflow: hidden; text-overflow: ellipsis; }
 tbody tr:last-child td { border-bottom: 0; }
 tbody tr:hover td { background: var(--raised); }
 .row-btn { padding: 8px; display: inline-flex; }

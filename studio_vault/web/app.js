@@ -215,9 +215,9 @@ function renderStudio() {
   const parts = [head];
 
   if (running) {
-    const order = ["plugins", "apps", "hardware"];
+    const order = ["plugins", "apps", "hardware", "content"];
     const at = order.indexOf(scan.phase);
-    const labels = { plugins: "Plug-ins", apps: "Music apps", hardware: "Hardware" };
+    const labels = { plugins: "Plug-ins", apps: "Music apps", hardware: "Hardware", content: "Presets & content" };
     parts.push(el("div", { class: "card progress-line" },
       el("div", { class: "steps" }, order.map((p, i) =>
         el("span", { class: i < at ? "done" : (i === at ? "now" : "") }, `${i < at ? "✓ " : ""}${labels[p]}`))),
@@ -461,8 +461,9 @@ function renderCompare() {
   if (c.a === c.b) { parts.push(el("div", { class: "empty", style: "margin-top: 16px" }, "Pick two different snapshots.")); root.replaceChildren(...parts); return; }
   if (!d) { root.replaceChildren(...parts); return; }
 
-  const nameA = d.a.machine_name || d.a.name, nameB = d.b.machine_name || d.b.name;
-  const sameMac = nameA === nameB;
+  // Same names as the A/B pickers above (the snapshot name; it defaults to the machine name).
+  const nameA = d.a.name || d.a.machine_name, nameB = d.b.name || d.b.machine_name;
+  const sameMac = nameA === nameB || (!!d.a.machine_name && d.a.machine_name === d.b.machine_name);
   const la = sameMac ? fmtShort(d.a.created_at) : nameA, lb = sameMac ? fmtShort(d.b.created_at) : nameB;
   const label = { only_a: "Only on A", only_b: "Only on B", different: "Different", same: "Same" };
   const stat = (key, n, text) => el("button", { class: c.filter === key ? "on" : "", "aria-pressed": String(c.filter === key),
@@ -1099,7 +1100,7 @@ function renderInventory() {
           ? el("button", { class: "vendor-link", title: `Open ${p.vendor}'s download page`, onclick: () => call("open_url", p.vendor_url) }, p.vendor, " ↗")
           : el("span", { class: "soft" }, p.vendor || "—")),
         el("td", { class: "nw" }, p.formats.map((f) => el("span", { class: "f" }, f))),
-        el("td", { class: "soft nw" }, p.version || "—"), el("td", { class: "num soft" }, fmtBytes(p.size)),
+        el("td", { class: "soft ver", title: p.version || null }, p.version || "—"), el("td", { class: "num soft" }, fmtBytes(p.size)),
         actions(p.path));
     } else if (inv.tab === "apps") {
       rows = d.apps.filter((a) => !q || a.name.toLowerCase().includes(q) || (a.developer || "").toLowerCase().includes(q));
@@ -1203,7 +1204,7 @@ function renderWelcome() {
     el("div", { class: "points" },
       point(["M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z", "M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"], "Read-only.", "It never moves, changes or deletes your plug-ins."),
       point(["M6 11h12a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2z", "M8 11V7a4 4 0 0 1 8 0v4"], "Private.", "Nothing about your studio leaves your Mac. No account, no cloud."),
-      point(["M13 2L4 14h7l-1 8 9-12h-7z"], "Fast.", "A full scan takes a few seconds.")),
+      point(["M13 2L4 14h7l-1 8 9-12h-7z"], "Fast.", "A full scan takes under a minute.")),
     el("div", { class: "actions" },
       el("button", { class: "btn primary", onclick: () => { w.classList.add("hidden"); show("studio"); startScan(); } }, "Scan this Mac"),
       el("button", { class: "btn", onclick: async () => {

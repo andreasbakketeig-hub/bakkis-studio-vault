@@ -196,6 +196,8 @@ def test_export_import_and_trash(vault, native, tmp_path):
     res = vault.export_snapshot(s["id"])
     assert res["ok"] and res["path"].endswith(".studiovault")
     assert native.last_default_name.endswith(".studiovault")
+    step = next(i for i in vault.leave_list()["leave"]["snapshot"] if i["id"] == "step:snapshot")
+    assert step["done"]                       # exporting this Mac's snapshot ticks "Before you leave" step 1
 
     assert vault.delete_snapshot(s["id"])["ok"]
     assert native.trashed and vault.snapshots()["snapshots"] == []

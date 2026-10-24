@@ -56,7 +56,7 @@ Then open the app again.
 
 ## Getting started
 
-1. Click **Scan this Mac**. A full scan takes a few seconds.
+1. Click **Scan this Mac**. A full scan takes under a minute (about 5 s for 1,200 plug-ins once sizes are cached).
 2. The scan is saved as a **snapshot**: a record of everything on this Mac on that day.
 3. Scan again any time. **My Studio** then shows what changed since the last snapshot.
 
