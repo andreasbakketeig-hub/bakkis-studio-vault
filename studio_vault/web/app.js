@@ -641,7 +641,11 @@ async function handoffCall(method, ...args) {
   if (res.ok && !res.cancelled && "report" in res) {
     const before = ui.ho.data && ui.ho.data.report ? ui.ho.data.report.set_path : "";
     ui.ho.data = res; ui.ho.open.clear();
-    if (!res.report || res.report.set_path !== before) { ui.ho.name = null; if (ui.ho.job && ui.ho.job.status !== "running") ui.ho.job = null; }
+    if (!res.report || res.report.set_path !== before) {
+      // Another project: the pack form (name, note, result) belongs to the previous one.
+      ui.ho.name = null; ui.ho.note = ""; ui.ho.packOpen = false;
+      if (ui.ho.job && ui.ho.job.status !== "running") ui.ho.job = null;
+    }
   }
   renderHandoff();
   return res;
