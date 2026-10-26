@@ -228,8 +228,10 @@ class Api:
                 raise ApiError("The quick action is missing from this build.")
             dest = self._services_dir() / QUICK_ACTION
             dest.parent.mkdir(parents=True, exist_ok=True)
-            if dest.exists():
+            if dest.is_dir() and not dest.is_symlink():
                 shutil.rmtree(dest)
+            elif dest.exists() or dest.is_symlink():
+                dest.unlink()
             shutil.copytree(src, dest)
             return _ok(installed=True, path=str(dest))
         return self._guard(run)
@@ -561,6 +563,12 @@ class Api:
                 return _ok(cancelled=True)
             return self._start_projects(folder=folder)
         return self._guard(run)
+
+    def projects_check_folder(self, folder: str) -> dict:
+        """A folder of projects dropped on the window or opened with the app."""
+        if not folder or not Path(folder).is_dir():
+            return _fail("That folder no longer exists.")
+        return self._start_projects(folder=str(folder))
 
     def projects_check_paths(self, paths: list[str]) -> dict:
         als = [p for p in paths if str(p).lower().endswith(".als")]

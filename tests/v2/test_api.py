@@ -617,6 +617,16 @@ class TestOpenPaths:
         assert [Path(p).name for p in found["als"]] == ["Song_v02.als", "Song_v01.als"]
         assert found["plugin_lists"] == [] and found["snapshots"] == []
 
+    def test_folder_of_projects_goes_to_project_check(self, tmp_path):
+        root = tmp_path / "BAKKIS PROJECTS"
+        (root / "2026" / "Song Project").mkdir(parents=True)
+        (root / "2026" / "Song Project" / "Song.als").write_bytes(b"x")
+        found = classify_paths([str(root)])
+        assert found["als"] == [] and found["folders"] == [str(root)]
+        calls = []
+        self._bridge(calls).open_paths([str(root)])
+        assert '"folder": ' in calls[0] and "BAKKIS PROJECTS" in calls[0]
+
     def test_opened_with_the_app_flag_reaches_the_page(self, tmp_path):
         als_file = tmp_path / "Song.als"
         als_file.write_bytes(b"x")
@@ -631,7 +641,10 @@ class TestOpenPaths:
         bridge = NativeBridge(SimpleNamespace(evaluate_js=calls.append))
         bridge.open_paths([str(als_file)], opened=True)
         assert calls == [] and bridge._pending == [str(als_file)]
-        bridge._drop_registered = True
-        bridge._pending, pending = [], bridge._pending
-        bridge.open_paths(pending, opened=True)
-        assert "Song.als" in calls[0]
+        class Hook:
+            def __iadd__(self, handler):
+                return self
+        bridge.window.dom = SimpleNamespace(document=SimpleNamespace(events=SimpleNamespace(drop=Hook())))
+        bridge._dark_title_bar = lambda: None
+        bridge.on_loaded()                       # the page is ready: pending paths go through as "opened"
+        assert "Song.als" in calls[0] and '"opened": true' in calls[0] and bridge._pending == []

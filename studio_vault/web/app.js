@@ -1310,6 +1310,9 @@ window.vault = {
       } else if (data.als.length) {
         const r = await call("projects_check_paths", data.als);
         if (r.ok) show("projects");
+      } else if (data.folder) {
+        const r = await call("projects_check_folder", data.folder);
+        if (r.ok) show("projects");
       }
     } else if (event === "toast") {
       toast(data.text, data.level);

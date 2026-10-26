@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess
 import sys
 import threading
@@ -55,21 +54,27 @@ def sets_in_folder(folder: Path) -> list[str]:
 
 
 def classify_paths(paths: list[str | None]) -> dict[str, list[str]]:
-    """Sort opened or dropped paths: {"als", "plugin_lists", "snapshots"}. Folders stand for the sets in them."""
+    """Sort opened or dropped paths: {"als", "plugin_lists", "snapshots", "folders"}.
+    A project folder stands for the sets in it; a folder without sets at its top level (a folder of projects)
+    goes to Project check as a whole."""
     als: list[str] = []
     lists: list[str] = []
+    folders: list[str] = []
     for raw in paths:
         if not raw:
             continue
         p = Path(raw)
         low = raw.lower()
         if p.is_dir():
-            als += sets_in_folder(p)
+            sets = sets_in_folder(p)
+            als += sets
+            if not sets:
+                folders.append(raw)
         elif low.endswith(".als") and p.is_file():
             als.append(raw)
         elif low.endswith(HANDOFF_LIST_SUFFIX) and p.is_file():
             lists.append(raw)
-    return {"als": als, "plugin_lists": lists, "snapshots": snapshot_files_from_drop(paths)}
+    return {"als": als, "plugin_lists": lists, "snapshots": snapshot_files_from_drop(paths), "folders": folders}
 
 
 class NativeBridge:
@@ -152,7 +157,7 @@ class NativeBridge:
         with self._lock:
             pending, self._pending = self._pending, []
         if pending:
-            self.open_paths(pending)
+            self.open_paths(pending, opened=True)    # only "Open with" and the command line arrive this early
 
     def _dark_title_bar(self) -> None:
         """Match the window chrome to the dark UI, whatever the system appearance is."""
@@ -184,6 +189,9 @@ class NativeBridge:
             # else .als files go to Projects.
             self.emit("dropped", {"als": found["als"], "plugin_lists": found["plugin_lists"], "opened": opened})
             return
+        if found["folders"]:
+            self.emit("dropped", {"als": [], "plugin_lists": [], "opened": opened, "folder": found["folders"][0]})
+            return
         if not found["snapshots"]:
             self.emit("toast", {"level": "warning", "text": "Drop a Live project folder or .als file, a plug-in list or a .studiovault snapshot."})
             return
@@ -204,7 +212,11 @@ def install_open_with(bridge: NativeBridge) -> None:
 
     class OpenWithDelegate(BrowserView.AppDelegate):
         def application_openFiles_(self, app, filenames):
-            bridge.open_paths([str(f) for f in filenames], opened=True)
+            # Called on the main thread. open_paths talks to the page through evaluate_js, which waits for
+            # the main run loop, so it must run on another thread or the app would hang.
+            paths = [str(f) for f in filenames]
+            threading.Thread(target=bridge.open_paths, args=(paths,), kwargs={"opened": True},
+                             name="open-with", daemon=True).start()
             app.replyToOpenOrPrint_(0)        # NSApplicationDelegateReplySuccess
             app.activateIgnoringOtherApps_(True)
 
