@@ -3,15 +3,22 @@ Desktop app: a pywebview (WKWebView) window showing ``web/index.html`` with
 :class:`studio_vault.api.Api` as ``window.pywebview.api``.
 
 Native actions the page cannot do itself (file dialogs, Finder, browser,
-Trash) live in :class:`NativeBridge`. Dropping a snapshot file on the window
-imports it (pywebview only exposes full paths of dropped files to Python).
+Trash) live in :class:`NativeBridge`.
+
+Files reach the app three ways, all through :meth:`NativeBridge.open_paths`:
+dropped on the window, opened with the app from Finder or the Dock (macOS
+``application:openFiles:``), or given on the command line. A Live Set or a
+project folder goes to Handoff, a plug-in list to Handoff, a snapshot is
+imported. Paths that arrive before the page is ready wait for it.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
+import sys
 import threading
 from pathlib import Path
 from typing import Any
@@ -36,6 +43,35 @@ def snapshot_files_from_drop(paths: list[str | None]) -> list[str]:
     return [p for p in paths if p and p.lower().endswith(SNAPSHOT_SUFFIXES) and Path(p).is_file()]
 
 
+def sets_in_folder(folder: Path) -> list[str]:
+    """The Live Sets a dropped project folder holds, newest first (Live's Backup folder left out)."""
+    try:
+        sets = [p for p in folder.iterdir()
+                if p.is_file() and p.suffix.lower() == ".als" and not p.name.startswith("._")]
+    except OSError:
+        return []
+    sets.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    return [str(p) for p in sets]
+
+
+def classify_paths(paths: list[str | None]) -> dict[str, list[str]]:
+    """Sort opened or dropped paths: {"als", "plugin_lists", "snapshots"}. Folders stand for the sets in them."""
+    als: list[str] = []
+    lists: list[str] = []
+    for raw in paths:
+        if not raw:
+            continue
+        p = Path(raw)
+        low = raw.lower()
+        if p.is_dir():
+            als += sets_in_folder(p)
+        elif low.endswith(".als") and p.is_file():
+            als.append(raw)
+        elif low.endswith(HANDOFF_LIST_SUFFIX) and p.is_file():
+            lists.append(raw)
+    return {"als": als, "plugin_lists": lists, "snapshots": snapshot_files_from_drop(paths)}
+
+
 class NativeBridge:
     """Window-level actions. ``window`` is a ``webview.Window`` (or a test double)."""
 
@@ -44,6 +80,7 @@ class NativeBridge:
         self.api: Api | None = None
         self._drop_registered = False
         self._lock = threading.Lock()
+        self._pending: list[str] = []      # paths opened before the page was ready
 
     # ── Native protocol (used by Api) ─────────────────────────────────────────
 
@@ -112,6 +149,10 @@ class NativeBridge:
 
         self.window.dom.document.events.drop += DOMEventHandler(
             self.on_drop, prevent_default=True, stop_propagation=False)
+        with self._lock:
+            pending, self._pending = self._pending, []
+        if pending:
+            self.open_paths(pending)
 
     def _dark_title_bar(self) -> None:
         """Match the window chrome to the dark UI, whatever the system appearance is."""
@@ -129,19 +170,25 @@ class NativeBridge:
 
     def on_drop(self, event: dict) -> None:
         files = ((event or {}).get("dataTransfer") or {}).get("files") or []
-        dropped = [f.get("pywebviewFullPath") for f in files if isinstance(f, dict)]
-        als = [p for p in dropped if p and p.lower().endswith(".als") and Path(p).is_file()]
-        lists = [p for p in dropped if p and p.lower().endswith(HANDOFF_LIST_SUFFIX) and Path(p).is_file()]
-        if als or lists:
-            # The page decides: Handoff takes them when it is open, else .als files go to Projects.
-            self.emit("dropped", {"als": als, "plugin_lists": lists})
+        self.open_paths([f.get("pywebviewFullPath") for f in files if isinstance(f, dict)])
+
+    def open_paths(self, paths: list[str | None], opened: bool = False) -> None:
+        """Dropped, "Open with" or command-line paths. *opened* means Finder/Dock: a set always goes to Handoff."""
+        with self._lock:
+            if not self._drop_registered:          # the page is not ready yet: hand them over when it is
+                self._pending += [p for p in paths if p]
+                return
+        found = classify_paths(paths)
+        if found["als"] or found["plugin_lists"]:
+            # The page decides: Handoff takes them when it is open or they were opened with the app,
+            # else .als files go to Projects.
+            self.emit("dropped", {"als": found["als"], "plugin_lists": found["plugin_lists"], "opened": opened})
             return
-        paths = snapshot_files_from_drop(dropped)
-        if not paths:
-            self.emit("toast", {"level": "warning", "text": "Drop a .studiovault snapshot, an Ableton Live Set (.als) or a plug-in list."})
+        if not found["snapshots"]:
+            self.emit("toast", {"level": "warning", "text": "Drop a Live project folder or .als file, a plug-in list or a .studiovault snapshot."})
             return
         assert self.api is not None
-        for path in paths:
+        for path in found["snapshots"]:
             result = self.api.import_path(path)
             if result.get("ok"):
                 self.emit("toast", {"level": "ok", "text": f"Imported “{result['name']}”."})
@@ -149,7 +196,23 @@ class NativeBridge:
                 self.emit("toast", {"level": "error", "text": result.get("error", "Import failed.")})
 
 
-def main() -> int:
+def install_open_with(bridge: NativeBridge) -> None:
+    """Receive files opened with the app (Finder "Open With", Dock drops) through pywebview's app delegate."""
+    if sys.platform != "darwin":
+        return
+    from webview.platforms.cocoa import BrowserView
+
+    class OpenWithDelegate(BrowserView.AppDelegate):
+        def application_openFiles_(self, app, filenames):
+            bridge.open_paths([str(f) for f in filenames], opened=True)
+            app.replyToOpenOrPrint_(0)        # NSApplicationDelegateReplySuccess
+            app.activateIgnoringOtherApps_(True)
+
+    BrowserView._shared_app_delegate = OpenWithDelegate.alloc().init()
+    BrowserView.app.setDelegate_(BrowserView._shared_app_delegate)
+
+
+def main(argv: list[str] | None = None) -> int:
     import webview
 
     debug = bool(os.environ.get("STUDIO_VAULT_DEBUG"))
@@ -169,5 +232,9 @@ def main() -> int:
     api._attach(native=bridge, emit=bridge.emit)
     window.events.loaded += bridge.on_loaded
     window.events.closed += api._shutdown
+    install_open_with(bridge)
+    args = [a for a in (sys.argv[1:] if argv is None else argv) if not a.startswith("-")]
+    if args:
+        bridge.open_paths(args, opened=True)      # waits for the page
     webview.start(http_server=True, private_mode=True, debug=debug)
     return 0

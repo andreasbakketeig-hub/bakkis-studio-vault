@@ -108,6 +108,13 @@ rest of the app, so it can become its own app.
 - Reminders shown (not visible in the file): libraries inside plug-ins, reference bounce, stems.
 - V2: diff between versions of a set.
 
+- Done (2026-10-26, collab flow): a Live project reaches Handoff by dropping the project folder (or .als) on the
+  window or the Dock icon, Finder › Open With (CFBundleDocumentTypes for .als, folders, .studiovault,
+  .handoffplugins), or the Finder quick action "Prepare for collab" (Automator workflow shipped in
+  `studio_vault/finder/`, installed from Settings into ~/Library/Services). Files opened before the page is ready
+  wait for it. Not built, on purpose: a background watcher that notifies on every Live save (needs an always-running
+  app; revisit if the drop / Open With flow is not enough).
+
 ## What to reuse from v1
 
 Port and trim (keep their tests):

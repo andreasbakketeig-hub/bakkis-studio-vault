@@ -19,6 +19,7 @@ import dataclasses
 import datetime
 import os
 import platform
+import shutil
 import threading
 import time
 import urllib.parse
@@ -40,6 +41,9 @@ SCAN_RUNNING = "running"
 SCAN_DONE = "done"
 SCAN_CANCELLED = "cancelled"
 SCAN_FAILED = "failed"
+
+QUICK_ACTION = "Prepare for collab.workflow"
+SERVICES_DIR = Path.home() / "Library" / "Services"
 
 LINKS = {
     "website": "https://bakkis.com",
@@ -207,7 +211,36 @@ class Api:
                 f"---\n{APP_NAME} {__version__} · macOS {macos} · {platform.machine()}")
         report_url = "mailto:bakkis@bakkis.com?" + urllib.parse.urlencode(
             {"subject": f"{APP_NAME} {__version__}: problem", "body": body}, quote_via=urllib.parse.quote)
-        return _ok(app_name=APP_NAME, version=__version__, macos=macos, links=LINKS, report_url=report_url)
+        return _ok(app_name=APP_NAME, version=__version__, macos=macos, links=LINKS, report_url=report_url,
+                   quick_action_installed=(self._services_dir() / QUICK_ACTION).is_dir())
+
+    # ── Finder quick action ("Prepare for collab") ────────────────────────────
+
+    @staticmethod
+    def _services_dir() -> Path:
+        return Path(os.environ.get("STUDIO_VAULT_SERVICES_DIR") or SERVICES_DIR)
+
+    def install_quick_action(self) -> dict:
+        """Copy the bundled Automator quick action to ~/Library/Services (Finder picks it up at once)."""
+        def run() -> dict:
+            src = config.bundle_dir() / "finder" / QUICK_ACTION
+            if not src.is_dir():
+                raise ApiError("The quick action is missing from this build.")
+            dest = self._services_dir() / QUICK_ACTION
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            if dest.exists():
+                shutil.rmtree(dest)
+            shutil.copytree(src, dest)
+            return _ok(installed=True, path=str(dest))
+        return self._guard(run)
+
+    def remove_quick_action(self) -> dict:
+        def run() -> dict:
+            dest = self._services_dir() / QUICK_ACTION
+            if dest.is_dir():
+                shutil.rmtree(dest)
+            return _ok(installed=False)
+        return self._guard(run)
 
     # ── scanning ──────────────────────────────────────────────────────────────
 

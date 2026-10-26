@@ -13,7 +13,7 @@ import pytest
 from studio_vault import api as api_mod
 from studio_vault import config
 from studio_vault import snapshot as snap
-from studio_vault.app import NativeBridge, snapshot_files_from_drop
+from studio_vault.app import NativeBridge, classify_paths, snapshot_files_from_drop
 from studio_vault.scanners.plugins import Plugin, ScanResult
 
 THIS_MAC = snap.hash_machine_id("TEST-UUID")
@@ -307,6 +307,7 @@ class TestBridge:
         calls = []
         bridge = NativeBridge(SimpleNamespace(evaluate_js=calls.append))
         bridge.api = vault
+        bridge._drop_registered = True          # the page is up (drops cannot happen before)
         bridge.on_drop({"dataTransfer": {"files": [{"pywebviewFullPath": str(exported)}]}})
         assert "Imported" in calls[0]
         assert len(vault.snapshots()["snapshots"]) == 1
@@ -318,6 +319,7 @@ class TestBridge:
         lst.write_text("{}")
         calls = []
         bridge = NativeBridge(SimpleNamespace(evaluate_js=calls.append))
+        bridge._drop_registered = True
         bridge.on_drop({"dataTransfer": {"files": [{"pywebviewFullPath": str(als_file)}, {"pywebviewFullPath": str(lst)}]}})
         assert calls[0].startswith('window.vault && vault.onEvent("dropped"')
         assert "Song.als" in calls[0] and "handoffplugins" in calls[0]
@@ -325,6 +327,7 @@ class TestBridge:
     def test_drop_wrong_file_warns(self, tmp_path):
         calls = []
         bridge = NativeBridge(SimpleNamespace(evaluate_js=calls.append))
+        bridge._drop_registered = True
         bridge.on_drop({"dataTransfer": {"files": [{"pywebviewFullPath": str(tmp_path / "x.mp3")}]}})
         assert "warning" in calls[0]
 
@@ -580,3 +583,55 @@ def test_no_update_means_nothing_to_install(vault):
         assert "newer" not in vault.check_update()
     assert vault.update_install()["error"] == "No newer version to install."
     assert vault.update_status()["status"] == "idle"
+
+
+def test_quick_action_install_and_remove(vault, tmp_path, monkeypatch):
+    monkeypatch.setenv("STUDIO_VAULT_SERVICES_DIR", str(tmp_path / "Services"))
+    assert vault.about()["quick_action_installed"] is False
+    res = vault.install_quick_action()
+    assert res["ok"] and res["installed"]
+    wf = tmp_path / "Services" / "Prepare for collab.workflow" / "Contents"
+    assert (wf / "Info.plist").is_file() and (wf / "document.wflow").is_file()
+    assert 'open -a "BAKKIS STUDIO VAULT" "$@"' in (wf / "document.wflow").read_bytes().decode("utf-8", "replace")
+    assert vault.about()["quick_action_installed"] is True
+    assert vault.install_quick_action()["ok"]           # a second install replaces the first
+    assert vault.remove_quick_action() == {"ok": True, "installed": False}
+    assert not wf.exists()
+
+
+class TestOpenPaths:
+    def _bridge(self, calls):
+        b = NativeBridge(SimpleNamespace(evaluate_js=calls.append))
+        b._drop_registered = True
+        return b
+
+    def test_project_folder_gives_its_sets_newest_first(self, tmp_path):
+        import os
+        proj = tmp_path / "Song Project"
+        (proj / "Backup").mkdir(parents=True)
+        (proj / "Backup" / "old.als").write_bytes(b"x")
+        for i, name in enumerate(["Song_v01.als", "Song_v02.als", "._Song_v02.als"]):
+            (proj / name).write_bytes(b"x")
+            os.utime(proj / name, (1000 + i, 1000 + i))
+        found = classify_paths([str(proj)])
+        assert [Path(p).name for p in found["als"]] == ["Song_v02.als", "Song_v01.als"]
+        assert found["plugin_lists"] == [] and found["snapshots"] == []
+
+    def test_opened_with_the_app_flag_reaches_the_page(self, tmp_path):
+        als_file = tmp_path / "Song.als"
+        als_file.write_bytes(b"x")
+        calls = []
+        self._bridge(calls).open_paths([str(als_file)], opened=True)
+        assert '"opened": true' in calls[0] and "Song.als" in calls[0]
+
+    def test_paths_wait_for_the_page(self, tmp_path):
+        als_file = tmp_path / "Song.als"
+        als_file.write_bytes(b"x")
+        calls = []
+        bridge = NativeBridge(SimpleNamespace(evaluate_js=calls.append))
+        bridge.open_paths([str(als_file)], opened=True)
+        assert calls == [] and bridge._pending == [str(als_file)]
+        bridge._drop_registered = True
+        bridge._pending, pending = [], bridge._pending
+        bridge.open_paths(pending, opened=True)
+        assert "Song.als" in calls[0]

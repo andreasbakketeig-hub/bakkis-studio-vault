@@ -569,7 +569,7 @@ function renderProjects() {
   }
   if (!d || (!d.projects.length && !d.unreadable.length)) {
     if (!running) parts.push(el("div", { class: "empty", style: "margin-top: 28px" },
-      "Check a folder with your Live projects (subfolders included, Backup folders skipped), or drop .als files on the window. Projects are only read, never changed."));
+      "Check a folder with your Live projects (subfolders included, Backup folders skipped), or drop .als files or project folders on the window. Projects are only read, never changed."));
     root.replaceChildren(...parts);
     return;
   }
@@ -678,7 +678,7 @@ function renderHandoff() {
   const setCard = el("div", { class: "card" },
     el("div", { class: "muted", style: "font-size: var(--fs-s)" }, "PROJECT"),
     r ? el("div", {}, el("b", {}, r.set_name), el("div", { class: "muted", style: "font-size: var(--fs-s); font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap", title: r.set_path }, r.set_path))
-      : el("div", { class: "soft" }, "Choose the Live Set you want to send, or drop it here."),
+      : el("div", { class: "soft" }, "Choose the Live Set you want to send, or drop the project folder here. You can also drop it on the app icon in the Dock."),
     el("div", { class: "actions" }, el("button", { class: r ? "btn small" : "btn primary", onclick: () => handoffCall("handoff_choose_set") }, r ? "Choose another…" : "Choose Live Set…"),
       r ? el("button", { class: "btn small", onclick: () => handoffCall("handoff_report") }, "Check again") : null));
   const recCard = el("div", { class: "card" },
@@ -1174,6 +1174,15 @@ function renderSettings() {
         el("button", { class: "link", onclick: async () => { const r = await call("remove_plugin_folder", f); if (r.ok) { ui.st.settings = r.settings; renderSettings(); } } }, "Remove"))),
       el("button", { class: "btn small", style: "align-self: flex-start", onclick: async () => {
         const r = await call("add_plugin_folder"); if (r.ok && !r.cancelled) { ui.st.settings = r.settings; renderSettings(); } } }, "Add folder…")),
+    el("div", { class: "label", style: "margin-top: 28px" }, "FINDER"),
+    el("div", { class: "set", style: "flex-direction: column; gap: 8px" },
+      el("span", {}, "Quick action: Prepare for collab"),
+      el("span", { class: "muted", style: "font-size: var(--fs-s)" },
+        "Right-click a Live project folder or .als file in Finder › Quick Actions › Prepare for collab: it opens here, checked and ready to pack. You can also drop a project on the app icon in the Dock, or choose Open With."),
+      el("button", { class: "btn small", style: "align-self: flex-start", onclick: async () => {
+        const r = await call(a.quick_action_installed ? "remove_quick_action" : "install_quick_action");
+        if (r.ok) { a.quick_action_installed = r.installed; renderSettings(); toast(r.installed ? "Quick action installed. Find it in Finder's right-click menu." : "Quick action removed."); } } },
+        a.quick_action_installed ? "Remove from Finder" : "Add to Finder")),
     el("div", { class: "label", style: "margin-top: 28px" }, "UPDATES"),
     toggle("check_for_updates", "Check for new versions", "One request to GitHub at startup. Nothing about you or your studio is sent."),
     el("div", { class: "label", style: "margin-top: 28px" }, "ABOUT"),
@@ -1288,7 +1297,9 @@ window.vault = {
       else if (data.status === "failed") toast(data.error, "error");
       if (ui.view === "handoff") renderHandoff();
     } else if (event === "dropped") {
-      if (data.plugin_lists.length || (ui.view === "handoff" && data.als.length)) {
+      if (!ui.st) { pendingDrops.push(data); return; }     // opened with the app: the page is still booting
+      // Opened with the app (Finder, Dock) or dropped while Handoff is open: get it ready for a collaborator.
+      if (data.plugin_lists.length || ((ui.view === "handoff" || data.opened) && data.als.length)) {
         ui.ho.mode = "send";
         await handoffCall("handoff_open_paths", [...data.als.slice(0, 1), ...data.plugin_lists.slice(0, 1)]);
         if (ui.view !== "handoff") show("handoff");
@@ -1312,13 +1323,19 @@ document.addEventListener("keydown", (e) => {
 // Stop the web view from opening dropped files itself; Python imports snapshot drops.
 ["dragover", "drop"].forEach((t) => window.addEventListener(t, (e) => e.preventDefault()));
 
+const pendingDrops = [];
+
 window.addEventListener("pywebviewready", async () => {
   await refresh();
   await loadStudioChanges();
   render();
-  if (!ui.st.has_snapshots && !ui.st.current && ui.st.scan.status !== "running") renderWelcome();
+  const opened = pendingDrops.splice(0);
+  if (opened.length) {
+    $("#welcome").classList.add("hidden");               // a project opened with the app comes first
+    for (const d of opened) await vault.onEvent("dropped", d);
+  } else if (!ui.st.has_snapshots && !ui.st.current && ui.st.scan.status !== "running") renderWelcome();
   else if (ui.st.settings.scan_on_launch && ui.st.scan.status !== "running") startScan();
-  if (!ui.st.settings.welcome_seen) showHello();
+  if (!ui.st.settings.welcome_seen && !opened.length) showHello();
   if (ui.st.settings.check_for_updates) setTimeout(checkForUpdate, 4000);
 });
 

@@ -14,7 +14,8 @@ IDENTITY = os.environ.get("CODESIGN_IDENTITY") or None
 a = Analysis(
     [str(ROOT / "studio_vault" / "__main__.py")],
     pathex=[str(ROOT)],
-    datas=[(str(ROOT / "studio_vault" / "web"), "studio_vault/web")],
+    datas=[(str(ROOT / "studio_vault" / "web"), "studio_vault/web"),
+           (str(ROOT / "studio_vault" / "finder"), "studio_vault/finder")],
     hiddenimports=["webview.platforms.cocoa"],
     # v1 (app/, CustomTkinter) and dev tools stay out of the bundle.
     excludes=["tkinter", "customtkinter", "PIL", "app", "pytest", "pyflakes", "PyInstaller", "setuptools"],
@@ -48,5 +49,23 @@ app = BUNDLE(
         "LSApplicationCategoryType": "public.app-category.music",
         "NSHighResolutionCapable": True,
         "NSHumanReadableCopyright": "© 2026 Andreas Bakketeig (BAKKIS). MIT License.",
+        # "Open with" from Finder and drops on the Dock icon: Live Sets and project folders go to Handoff,
+        # plug-in lists and snapshots are loaded. The app only reads them.
+        "CFBundleDocumentTypes": [
+            {"CFBundleTypeName": "Ableton Live Set", "CFBundleTypeRole": "Viewer",
+             "CFBundleTypeExtensions": ["als"], "LSHandlerRank": "Alternate"},
+            {"CFBundleTypeName": "Folder", "CFBundleTypeRole": "Viewer",
+             "LSItemContentTypes": ["public.folder"], "LSHandlerRank": "None"},
+            {"CFBundleTypeName": "Studio Vault snapshot", "CFBundleTypeRole": "Editor",
+             "LSItemContentTypes": ["com.bakkis.studio-vault.snapshot"], "LSHandlerRank": "Owner"},
+            {"CFBundleTypeName": "Handoff plug-in list", "CFBundleTypeRole": "Editor",
+             "LSItemContentTypes": ["com.bakkis.studio-vault.handoffplugins"], "LSHandlerRank": "Owner"},
+        ],
+        "UTExportedTypeDeclarations": [
+            {"UTTypeIdentifier": "com.bakkis.studio-vault.snapshot", "UTTypeDescription": "Studio Vault snapshot",
+             "UTTypeConformsTo": ["public.json"], "UTTypeTagSpecification": {"public.filename-extension": ["studiovault"]}},
+            {"UTTypeIdentifier": "com.bakkis.studio-vault.handoffplugins", "UTTypeDescription": "Handoff plug-in list",
+             "UTTypeConformsTo": ["public.json"], "UTTypeTagSpecification": {"public.filename-extension": ["handoffplugins"]}},
+        ],
     },
 )
